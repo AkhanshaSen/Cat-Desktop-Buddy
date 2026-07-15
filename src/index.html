@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:"
+    />
+    <title>AI Meow</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="buddy-stack" class="buddy-stack">
+        <div id="cat-container" class="cat-container">
+          <div id="chat-panel" class="chat-panel hidden">
+            <div class="chat-header">
+              <div class="chat-tabs">
+                <button id="tab-chat" class="chat-tab active" title="Chat">🐱 Chat</button>
+                <button id="tab-look" class="chat-tab" title="Change look">✨ Look</button>
+              </div>
+              <button id="close-chat" class="icon-btn" title="Close">×</button>
+            </div>
+
+            <div id="look-panel" class="look-panel hidden">
+              <div id="appearance-panel" class="appearance-panel">
+                <div class="appearance-row">
+                  <span class="appearance-label">Coat</span>
+                  <div class="coat-swatches"></div>
+                </div>
+                <div class="appearance-row">
+                  <span class="appearance-label">Wear</span>
+                  <div class="acc-swatches"></div>
+                </div>
+              </div>
+            </div>
+
+            <div id="chat-body" class="chat-body">
+              <div id="chat-messages" class="chat-messages"></div>
+              <div class="chat-input-row">
+                <input id="chat-input" type="text" placeholder="Say something..." autocomplete="off" maxlength="500" />
+                <button id="send-btn" class="send-btn" title="Send">➤</button>
+              </div>
+              <div class="quick-actions">
+                <button class="quick-btn" data-prompt="How was your day?">☀️ Day</button>
+                <button class="quick-btn" data-prompt="I need motivation">💪 Boost</button>
+                <button class="quick-btn" data-prompt="Tell me something cute">💕 Cute</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="break-alert" class="break-alert hidden" role="alert" aria-live="assertive">
+            <div class="break-alert-inner">
+              <span class="break-alert-icon">⏰</span>
+              <p id="break-alert-text" class="break-alert-text">Break time!</p>
+              <button id="break-dismiss" class="break-dismiss" title="Okay, I'll rest!">Got it!</button>
+            </div>
+          </div>
+
+          <div id="cat" class="cat" data-expression="happy" data-pose="loaf" data-coat="cream" data-accessory="none" data-activity="none">
+            <div id="speech-bubble" class="speech-bubble hidden" aria-live="polite">
+              <p id="speech-text"></p>
+              <div class="bubble-tail"></div>
+            </div>
+
+            <div id="food-choice" class="food-choice hidden" aria-live="polite">
+              <p class="food-choice-label">What do you want? 🥺</p>
+              <div class="food-choice-btns">
+                <button class="food-opt" data-food="plain" title="Plain food">🍚 Plain</button>
+                <button class="food-opt" data-food="fishy" title="Fish meal">🐟 Fishy</button>
+              </div>
+              <div class="bubble-tail"></div>
+            </div>
+
+            <div class="zzz-bubble hidden" aria-hidden="true">
+              <span>z</span><span>z</span><span>Z</span>
+            </div>
+            <div id="pet-hearts" class="pet-hearts" aria-hidden="true"></div>
+
+            <div class="cat-scene">
+              <div id="activity-props" class="activity-props hidden" aria-hidden="true">
+                <!-- Laptop -->
+                <svg class="prop-svg prop-laptop" viewBox="0 0 56 40" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="8" y="22" width="40" height="4" rx="1" fill="#8898a8"/>
+                  <rect x="10" y="24" width="36" height="14" rx="2" fill="#b0bcc8"/>
+                  <rect x="14" y="4" width="28" height="20" rx="2" fill="#3a4860"/>
+                  <rect class="laptop-screen" x="16" y="6" width="24" height="16" rx="1" fill="#6ab0ff"/>
+                  <rect class="laptop-key" x="18" y="27" width="4" height="2" rx="0.5" fill="#d0d8e0"/>
+                  <rect class="laptop-key" x="24" y="27" width="4" height="2" rx="0.5" fill="#d0d8e0"/>
+                  <rect class="laptop-key" x="30" y="27" width="4" height="2" rx="0.5" fill="#d0d8e0"/>
+                </svg>
+                <!-- Book -->
+                <svg class="prop-svg prop-read" viewBox="0 0 44 36" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M4,6 L22,10 L22,32 L4,28 Z" fill="#ff8fab"/>
+                  <path d="M40,6 L22,10 L22,32 L40,28 Z" fill="#ffb3c6"/>
+                  <line x1="22" y1="10" x2="22" y2="32" stroke="#e06080" stroke-width="1"/>
+                  <path class="book-line" d="M8,14 L18,16" stroke="#fff" stroke-width="1" opacity="0.7"/>
+                  <path class="book-line" d="M8,18 L18,20" stroke="#fff" stroke-width="1" opacity="0.7"/>
+                  <path class="book-line" d="M26,16 L36,14" stroke="#fff" stroke-width="1" opacity="0.7"/>
+                </svg>
+                <!-- Phone -->
+                <svg class="prop-svg prop-phone" viewBox="0 0 28 44" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="4" y="2" width="20" height="36" rx="4" fill="#3a3a48"/>
+                  <rect x="6" y="6" width="16" height="28" rx="2" fill="#80c8ff"/>
+                  <circle class="phone-notif" cx="20" cy="8" r="3" fill="#ff7096"/>
+                  <rect class="phone-scroll" x="8" y="10" width="12" height="3" rx="1" fill="#fff" opacity="0.6"/>
+                  <rect class="phone-scroll" x="8" y="15" width="10" height="3" rx="1" fill="#fff" opacity="0.4"/>
+                </svg>
+                <!-- Coffee -->
+                <svg class="prop-svg prop-coffee" viewBox="0 0 36 40" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M8,16 L8,30 Q8,34 18,34 Q28,34 28,30 L28,16 Z" fill="#fff" stroke="#c8a890" stroke-width="1.5"/>
+                  <path d="M28,20 L32,20 Q36,20 36,24 Q36,28 28,28" fill="none" stroke="#c8a890" stroke-width="2"/>
+                  <ellipse cx="18" cy="16" rx="10" ry="3" fill="#6a4030"/>
+                  <path class="steam" d="M14,8 Q12,2 14,0" stroke="#ccc" stroke-width="1.5" fill="none" opacity="0.6"/>
+                  <path class="steam" d="M18,10 Q16,4 18,2" stroke="#ccc" stroke-width="1.5" fill="none" opacity="0.6"/>
+                  <path class="steam" d="M22,8 Q24,2 22,0" stroke="#ccc" stroke-width="1.5" fill="none" opacity="0.6"/>
+                </svg>
+                <!-- Notebook -->
+                <svg class="prop-svg prop-notebook" viewBox="0 0 40 44" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="6" y="4" width="28" height="36" rx="2" fill="#fff8e0" stroke="#e8d0a0" stroke-width="1.5"/>
+                  <line x1="12" y1="4" x2="12" y2="40" stroke="#ff7096" stroke-width="1" opacity="0.5"/>
+                  <path class="pen-stroke" d="M16,14 L30,14" stroke="#5080c0" stroke-width="1.2"/>
+                  <path class="pen-stroke" d="M16,20 L28,20" stroke="#5080c0" stroke-width="1.2"/>
+                  <path class="pen-stroke" d="M16,26 L24,26" stroke="#5080c0" stroke-width="1.2"/>
+                  <line class="pencil" x1="32" y1="10" x2="38" y2="4" stroke="#f0a860" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <!-- Game -->
+                <svg class="prop-svg prop-game" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="4" y="8" width="36" height="20" rx="6" fill="#6a5080"/>
+                  <circle cx="14" cy="18" r="4" fill="#ff7096"/>
+                  <circle cx="14" cy="18" r="1.5" fill="#fff"/>
+                  <rect x="26" y="14" width="4" height="8" rx="1" fill="#80d0ff"/>
+                  <rect x="24" y="16" width="8" height="4" rx="1" fill="#80d0ff"/>
+                  <rect class="game-blink" x="8" y="10" width="4" height="2" rx="1" fill="#90ff90"/>
+                </svg>
+              </div>
+
+              <div id="cat-figure" class="cat-figure">
+                <button id="quit-btn" class="quit-x" title="Quit AI Meow" aria-label="Quit">×</button>
+                <div id="pet-zone-head" class="pet-zone pet-zone-head" title="Pet my head — purrs!"></div>
+
+                <svg id="cat-svg-loaf" class="cat-svg cat-loaf-view" viewBox="0 0 120 128" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <ellipse cx="60" cy="125" rx="35" ry="4.5" fill="rgba(160,100,50,0.13)"/>
+                  <path class="cat-tail fur-shadow" d="M91,86 C108,74 116,98 102,110 C93,117 83,111 86,102" stroke-width="10" fill="none" stroke-linecap="round"/>
+                  <ellipse class="cat-body fur" cx="60" cy="97" rx="43" ry="28"/>
+                  <ellipse class="fur" cx="60" cy="72" rx="26" ry="18"/>
+                  <polygon class="ear-left fur" points="25,40 14,10 43,26"/>
+                  <polygon class="ear-inner" points="27,37 19,14 41,27"/>
+                  <polygon class="ear-right fur" points="95,40 106,10 77,26"/>
+                  <polygon class="ear-inner" points="93,37 101,14 79,27"/>
+                  <ellipse class="cat-head fur" cx="60" cy="57" rx="35" ry="33"/>
+
+                  <g class="eyes-normal">
+                    <g class="eye-group eye-left" data-cx="44" data-cy="57">
+                      <circle cx="44" cy="57" r="9" fill="white"/>
+                      <circle class="eye-pupil" cx="44" cy="57" r="5" fill="#1a1a2e"/>
+                      <circle class="eye-shine" cx="46" cy="54" r="1.8" fill="white" opacity="0.85"/>
+                    </g>
+                    <g class="eye-group eye-right" data-cx="76" data-cy="57">
+                      <circle cx="76" cy="57" r="9" fill="white"/>
+                      <circle class="eye-pupil" cx="76" cy="57" r="5" fill="#1a1a2e"/>
+                      <circle class="eye-shine" cx="78" cy="54" r="1.8" fill="white" opacity="0.85"/>
+                    </g>
+                  </g>
+
+                  <g class="eyes-blink">
+                    <path d="M35,57 Q44,53 53,57" stroke="#1a1a2e" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+                    <path d="M67,57 Q76,53 85,57" stroke="#1a1a2e" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+                  </g>
+
+                  <g class="eyes-sleepy">
+                    <path d="M35,57 Q44,62 53,57" stroke="#1a1a2e" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+                    <path d="M67,57 Q76,62 85,57" stroke="#1a1a2e" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+                  </g>
+
+                  <g class="eyes-excited">
+                    <circle cx="44" cy="56" r="11" fill="#1a1a2e"/>
+                    <circle cx="47" cy="50" r="4" fill="white"/>
+                    <circle cx="76" cy="56" r="11" fill="#1a1a2e"/>
+                    <circle cx="79" cy="50" r="4" fill="white"/>
+                  </g>
+
+                  <g class="eyes-love">
+                    <text x="44" y="61" text-anchor="middle" font-size="14" fill="#e05588">♥</text>
+                    <text x="76" y="61" text-anchor="middle" font-size="14" fill="#e05588">♥</text>
+                  </g>
+
+                  <polygon points="60,65 55.5,71 64.5,71" fill="#e8a0b4"/>
+                  <g class="mouth-happy"><path d="M54,72 Q60,78 66,72" stroke="#c07888" stroke-width="1.8" fill="none" stroke-linecap="round"/></g>
+                  <g class="mouth-sad"><path d="M54,76 Q60,71 66,76" stroke="#c07888" stroke-width="1.8" fill="none" stroke-linecap="round"/></g>
+                  <g class="mouth-nom"><ellipse cx="60" cy="74" rx="5" ry="4" fill="#c07888" opacity="0.8"/></g>
+                  <g class="mouth-purr"><path d="M54,73 Q60,76 66,73" stroke="#c07888" stroke-width="1.5" fill="none" stroke-linecap="round"/></g>
+
+                  <ellipse cx="31" cy="67" rx="9" ry="5.5" fill="#f5b8c6" opacity="0.45"/>
+                  <ellipse cx="89" cy="67" rx="9" ry="5.5" fill="#f5b8c6" opacity="0.45"/>
+                  <line x1="14" y1="62" x2="40" y2="65" stroke="#c8a890" stroke-width="1" opacity="0.6"/>
+                  <line x1="13" y1="68" x2="40" y2="68" stroke="#c8a890" stroke-width="1" opacity="0.6"/>
+                  <line x1="106" y1="62" x2="80" y2="65" stroke="#c8a890" stroke-width="1" opacity="0.6"/>
+                  <line x1="107" y1="68" x2="80" y2="68" stroke="#c8a890" stroke-width="1" opacity="0.6"/>
+                  <ellipse class="paw-left paw" cx="42" cy="117" rx="15" ry="9"/>
+                  <ellipse class="paw-right paw" cx="78" cy="117" rx="15" ry="9"/>
+
+                  <!-- Accessories -->
+                  <g class="accessory-layer" pointer-events="none">
+                    <g class="acc-hat">
+                      <ellipse cx="60" cy="22" rx="18" ry="5" fill="#4a3040"/>
+                      <rect x="48" y="8" width="24" height="14" rx="3" fill="#5a4060"/>
+                      <rect x="52" y="4" width="16" height="6" rx="2" fill="#6a5070"/>
+                    </g>
+                    <g class="acc-bow">
+                      <ellipse cx="28" cy="32" rx="7" ry="5" fill="#ff7096"/>
+                      <ellipse cx="20" cy="32" rx="5" ry="4" fill="#ff8fab"/>
+                      <ellipse cx="36" cy="32" rx="5" ry="4" fill="#ff8fab"/>
+                      <circle cx="28" cy="32" r="3" fill="#ff5080"/>
+                    </g>
+                    <g class="acc-scarf">
+                      <path d="M32,74 Q60,82 88,74 L88,80 Q60,88 32,80 Z" fill="#ff6b8a"/>
+                      <path d="M78,78 L84,92 L76,94 L72,80 Z" fill="#ff5080"/>
+                    </g>
+                    <g class="acc-flower">
+                      <circle cx="38" cy="22" r="4" fill="#ffb3d9"/>
+                      <circle cx="44" cy="18" r="4" fill="#ff8fc8"/>
+                      <circle cx="50" cy="22" r="4" fill="#ffb3d9"/>
+                      <circle cx="47" cy="26" r="4" fill="#ffc8e0"/>
+                      <circle cx="41" cy="26" r="4" fill="#ffc8e0"/>
+                      <circle cx="44" cy="22" r="2.5" fill="#ffea80"/>
+                    </g>
+                    <g class="acc-glasses">
+                      <circle cx="44" cy="57" r="11" fill="none" stroke="#4a3040" stroke-width="2"/>
+                      <circle cx="76" cy="57" r="11" fill="none" stroke="#4a3040" stroke-width="2"/>
+                      <line x1="55" y1="57" x2="65" y2="57" stroke="#4a3040" stroke-width="2"/>
+                    </g>
+                  </g>
+                </svg>
+
+                <div class="nom-float hidden" aria-hidden="true">nom~</div>
+              </div>
+
+              <div id="food-bowl" class="food-bowl" title="Drag bowl to my mouth to feed me">
+                <div class="bowl-rim"></div>
+                <div class="bowl-body"></div>
+                <div class="bowl-food"></div>
+              </div>
+            </div>
+          </div>
+
+          <div id="hints-bar" class="hints-bar" aria-live="polite">
+            <p id="hint-text" class="hint-text"></p>
+          </div>
+        </div>
+      </div>
+
+      <div id="context-menu" class="context-menu hidden">
+        <button data-action="hide">Hide Meow</button>
+        <button data-action="quit">Quit</button>
+      </div>
+    </div>
+
+    <script src="personality.js"></script>
+    <script src="appearance.js"></script>
+    <script src="cat.js"></script>
+    <script src="chat.js"></script>
+  </body>
+</html>

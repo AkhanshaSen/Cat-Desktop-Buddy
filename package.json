@@ -1,0 +1,17 @@
+{
+  "name": "ai-meow",
+  "version": "1.0.0",
+  "description": "A floating cute cat desktop buddy that chats, motivates, and makes expressions",
+  "main": "main.js",
+  "scripts": {
+    "start": "env -u ELECTRON_RUN_AS_NODE electron .",
+    "dev": "env -u ELECTRON_RUN_AS_NODE electron . --enable-logging",
+    "stop": "pkill -f 'electron.*AI Meow' 2>/dev/null; pkill -f 'Electron.*AI Meow' 2>/dev/null; pkill -f 'Electron Helper.*AI Meow' 2>/dev/null; true"
+  },
+  "keywords": ["desktop-pet", "cat", "buddy", "electron"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^35.0.0"
+  }
+}
