@@ -10,16 +10,23 @@
   const quickBtns = document.querySelectorAll('.quick-btn');
   const tabChat = document.getElementById('tab-chat');
   const tabLook = document.getElementById('tab-look');
+  const tabSettings = document.getElementById('tab-settings');
   const lookPanel = document.getElementById('look-panel');
+  const settingsPanel = document.getElementById('settings-panel');
   const chatBody = document.getElementById('chat-body');
 
   let isOpen = false;
   let greeted = false;
   let activeTab = 'chat';
+  let historyRestored = false;
+
+  const CHAT_HISTORY_KEY = 'meowChatHistory';
+  const MAX_HISTORY = 20;
 
   const COMPACT_SIZE = { width: 220, height: 240 };
-  const CHAT_SIZE   = { width: 220, height: 442 };
-  const LOOK_SIZE   = { width: 220, height: 344 };
+  const CHAT_SIZE = { width: 220, height: 442 };
+  const LOOK_SIZE = { width: 220, height: 344 };
+  const SETTINGS_SIZE = { width: 220, height: 360 };
 
   function resizeWindow(size, anchorBottom = false) {
     if (window.meowAPI?.resizeWindow) {
@@ -27,18 +34,61 @@
     }
   }
 
+  function loadChatHistory() {
+    try {
+      const raw = localStorage.getItem(CHAT_HISTORY_KEY);
+      if (!raw) return [];
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.slice(-MAX_HISTORY) : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function saveChatHistory(role, text) {
+    const hist = loadChatHistory();
+    hist.push({ role, text, ts: Date.now() });
+    localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(hist.slice(-MAX_HISTORY)));
+  }
+
   function switchTab(tab) {
     activeTab = tab;
-    tabChat.classList.toggle('active', tab === 'chat');
-    tabLook.classList.toggle('active', tab === 'look');
-    lookPanel.classList.toggle('hidden', tab !== 'look');
-    chatBody.classList.toggle('hidden', tab !== 'chat');
+    tabChat?.classList.toggle('active', tab === 'chat');
+    tabLook?.classList.toggle('active', tab === 'look');
+    tabSettings?.classList.toggle('active', tab === 'settings');
+    lookPanel?.classList.toggle('hidden', tab !== 'look');
+    settingsPanel?.classList.toggle('hidden', tab !== 'settings');
+    chatBody?.classList.toggle('hidden', tab !== 'chat');
+
     if (tab === 'look') {
       resizeWindow(LOOK_SIZE, true);
+    } else if (tab === 'settings') {
+      resizeWindow(SETTINGS_SIZE, true);
     } else {
       resizeWindow(CHAT_SIZE, true);
-      chatInput.focus();
+      chatInput?.focus();
     }
+  }
+
+  function restoreSessionMessages() {
+    if (historyRestored) return;
+    historyRestored = true;
+    const hist = loadChatHistory();
+    if (hist.length === 0) return;
+
+    const recent = hist.slice(-5);
+    const sep = document.createElement('div');
+    sep.className = 'msg-session-sep';
+    sep.textContent = '— last session —';
+    chatMessages.appendChild(sep);
+
+    recent.forEach((m) => {
+      const div = document.createElement('div');
+      div.className = `msg ${m.role}`;
+      div.textContent = m.text;
+      chatMessages.appendChild(div);
+    });
+    chatMessages.scrollTop = chatMessages.scrollHeight;
   }
 
   function openChat() {
@@ -54,7 +104,8 @@
 
     if (!greeted) {
       greeted = true;
-      addMessage('meow', "Hi friend! 🐱 How's your day going? I'm all ears!");
+      restoreSessionMessages();
+      addMessage('meow', "Hi friend! 🐱 How's your day going? I'm all ears!", false);
       window.MeowCat.setExpression('happy');
     }
   }
@@ -65,12 +116,13 @@
     resizeWindow(COMPACT_SIZE, true);
   }
 
-  function addMessage(role, text) {
+  function addMessage(role, text, persist = true) {
     const div = document.createElement('div');
     div.className = `msg ${role}`;
     div.textContent = text;
     chatMessages.appendChild(div);
     chatMessages.scrollTop = chatMessages.scrollHeight;
+    if (persist) saveChatHistory(role, text);
     return div;
   }
 
@@ -122,8 +174,9 @@
     typeAndRespond(text);
   }
 
-  tabChat.addEventListener('click', (e) => { e.stopPropagation(); switchTab('chat'); });
-  tabLook.addEventListener('click', (e) => { e.stopPropagation(); switchTab('look'); });
+  tabChat?.addEventListener('click', (e) => { e.stopPropagation(); switchTab('chat'); });
+  tabLook?.addEventListener('click', (e) => { e.stopPropagation(); switchTab('look'); });
+  tabSettings?.addEventListener('click', (e) => { e.stopPropagation(); switchTab('settings'); });
 
   sendBtn.addEventListener('click', sendMessage);
 

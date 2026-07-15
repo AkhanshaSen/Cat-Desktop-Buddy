@@ -9,11 +9,15 @@ const WORK_TRACK_POLL_MS = 15000;
 const WORK_LIMIT_MS = 2 * 60 * 60 * 1000; // 2 hours
 const ACTIVE_IDLE_MAX_SEC = 90;  // idle < 90s = still working
 const RESET_IDLE_SEC = 300;      // 5 min idle = reset streak
-const BREAK_ALERT_COOLDOWN_MS = 30 * 60 * 1000;
+const DEFAULT_BREAK_COOLDOWN_MS = 30 * 60 * 1000;
 
 let activeWorkMs = 0;
 let lastBreakAlertAt = 0;
+let breakCooldownMs = DEFAULT_BREAK_COOLDOWN_MS;
+let snoozeUntil = 0;
+let fullscreenHint = false;
 let workTrackerInterval = null;
+let batteryPollInterval = null;
 
 function resetWorkStreak() {
   activeWorkMs = 0;
@@ -31,6 +35,8 @@ function nudgeCatWindow() {
 
 function sendBreakReminder() {
   if (!catWindow) return;
+  if (Date.now() < snoozeUntil) return;
+
   catWindow.show();
   catWindow.moveTop();
   if (process.platform !== 'darwin') catWindow.flashFrame(true);
@@ -38,9 +44,30 @@ function sendBreakReminder() {
   const hours = Math.floor(activeWorkMs / 3600000);
   const minutes = Math.floor((activeWorkMs % 3600000) / 60000);
 
-  catWindow.webContents.send('break-reminder', { hours, minutes, activeMs: activeWorkMs });
+  catWindow.webContents.send('break-reminder', {
+    hours,
+    minutes,
+    activeMs: activeWorkMs,
+    gentle: fullscreenHint,
+  });
   nudgeCatWindow();
   lastBreakAlertAt = Date.now();
+}
+
+function pushBatteryStatus() {
+  if (!catWindow) return;
+  let onBattery = false;
+  try {
+    if (typeof powerMonitor.isOnBatteryPower === 'function') {
+      onBattery = powerMonitor.isOnBatteryPower();
+    } else if (typeof powerMonitor.getSystemIdleState === 'function') {
+      // older fallback: treat unknown as not on battery
+      onBattery = false;
+    }
+  } catch (_) {
+    onBattery = false;
+  }
+  catWindow.webContents.send('battery-saver-changed', onBattery);
 }
 
 function startWorkTracker() {
@@ -61,8 +88,9 @@ function startWorkTracker() {
     }
 
     if (activeWorkMs >= WORK_LIMIT_MS) {
+      if (Date.now() < snoozeUntil) return;
       const sinceLastAlert = Date.now() - lastBreakAlertAt;
-      if (lastBreakAlertAt === 0 || sinceLastAlert >= BREAK_ALERT_COOLDOWN_MS) {
+      if (lastBreakAlertAt === 0 || sinceLastAlert >= breakCooldownMs) {
         sendBreakReminder();
       }
     }
@@ -72,6 +100,19 @@ function startWorkTracker() {
   powerMonitor.on('lock-screen', resetWorkStreak);
   powerMonitor.on('resume', resetWorkStreak);
   powerMonitor.on('unlock-screen', resetWorkStreak);
+
+  if (!batteryPollInterval) {
+    pushBatteryStatus();
+    batteryPollInterval = setInterval(pushBatteryStatus, 60000);
+    try {
+      powerMonitor.on('on-ac', () => {
+        if (catWindow) catWindow.webContents.send('battery-saver-changed', false);
+      });
+      powerMonitor.on('on-battery', () => {
+        if (catWindow) catWindow.webContents.send('battery-saver-changed', true);
+      });
+    } catch (_) { /* older Electron */ }
+  }
 }
 
 // Only one Meow at a time — prevents duplicate cats when running npm start again
@@ -130,6 +171,10 @@ function createCatWindow() {
   });
 
   catWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
+
+  catWindow.webContents.on('did-finish-load', () => {
+    pushBatteryStatus();
+  });
 
   if (process.platform === 'darwin') {
     catWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
@@ -220,6 +265,23 @@ ipcMain.on('window-resize', (_event, { width, height, anchorBottom }) => {
 
 ipcMain.on('break-dismissed', () => {
   if (catWindow) catWindow.flashFrame(false);
+});
+
+ipcMain.on('break-snoozed', (_event, { minutes }) => {
+  const mins = [10, 30, 60].includes(minutes) ? minutes : 30;
+  snoozeUntil = Date.now() + mins * 60 * 1000;
+  lastBreakAlertAt = Date.now();
+  if (catWindow) catWindow.flashFrame(false);
+});
+
+ipcMain.on('settings-updated', (_event, settings) => {
+  if (settings && [10, 30, 60].includes(settings.snoozeDuration)) {
+    breakCooldownMs = settings.snoozeDuration * 60 * 1000;
+  }
+});
+
+ipcMain.on('fullscreen-hint', (_event, { isFullscreen }) => {
+  fullscreenHint = !!isFullscreen;
 });
 
 if (gotSingleInstanceLock) {

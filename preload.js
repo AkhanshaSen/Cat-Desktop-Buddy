@@ -7,7 +7,13 @@ contextBridge.exposeInMainWorld('meowAPI', {
   resizeWindow: (width, height, anchorBottom = false) =>
     ipcRenderer.send('window-resize', { width, height, anchorBottom }),
   dismissBreakReminder: () => ipcRenderer.send('break-dismissed'),
+  snoozeBreakReminder: (minutes) => ipcRenderer.send('break-snoozed', { minutes }),
+  updateSettings: (settings) => ipcRenderer.send('settings-updated', settings),
+  setFullscreenHint: (isFullscreen) => ipcRenderer.send('fullscreen-hint', { isFullscreen }),
   onBreakReminder: (callback) => {
     ipcRenderer.on('break-reminder', (_event, data) => callback(data));
+  },
+  onBatterySaver: (callback) => {
+    ipcRenderer.on('battery-saver-changed', (_event, onBattery) => callback(onBattery));
   },
 });

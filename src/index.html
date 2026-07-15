@@ -19,6 +19,7 @@
               <div class="chat-tabs">
                 <button id="tab-chat" class="chat-tab active" title="Chat">🐱 Chat</button>
                 <button id="tab-look" class="chat-tab" title="Change look">✨ Look</button>
+                <button id="tab-settings" class="chat-tab" title="Settings">⚙</button>
               </div>
               <button id="close-chat" class="icon-btn" title="Close">×</button>
             </div>
@@ -35,6 +36,8 @@
                 </div>
               </div>
             </div>
+
+            <div id="settings-panel" class="settings-panel hidden"></div>
 
             <div id="chat-body" class="chat-body">
               <div id="chat-messages" class="chat-messages"></div>
@@ -54,7 +57,12 @@
             <div class="break-alert-inner">
               <span class="break-alert-icon">⏰</span>
               <p id="break-alert-text" class="break-alert-text">Break time!</p>
-              <button id="break-dismiss" class="break-dismiss" title="Okay, I'll rest!">Got it!</button>
+              <div class="break-actions">
+                <button id="break-dismiss" class="break-dismiss" title="Dismiss">Got it!</button>
+                <button class="break-snooze" data-mins="10" title="Snooze 10 minutes">10m</button>
+                <button class="break-snooze" data-mins="30" title="Snooze 30 minutes">30m</button>
+                <button class="break-snooze" data-mins="60" title="Snooze 60 minutes">60m</button>
+              </div>
             </div>
           </div>
 
@@ -67,8 +75,8 @@
             <div id="food-choice" class="food-choice hidden" aria-live="polite">
               <p class="food-choice-label">What do you want? 🥺</p>
               <div class="food-choice-btns">
-                <button class="food-opt" data-food="plain" title="Plain food">🍚 Plain</button>
-                <button class="food-opt" data-food="fishy" title="Fish meal">🐟 Fishy</button>
+                <button class="food-opt" data-food="plain" title="Plain food">🍚 Plain<span class="food-star hidden" aria-hidden="true">★</span></button>
+                <button class="food-opt" data-food="fishy" title="Fish meal">🐟 Fishy<span class="food-star hidden" aria-hidden="true">★</span></button>
               </div>
               <div class="bubble-tail"></div>
             </div>
@@ -138,6 +146,7 @@
 
               <div id="cat-figure" class="cat-figure">
                 <button id="quit-btn" class="quit-x" title="Quit AI Meow" aria-label="Quit">×</button>
+                <button id="focus-badge" class="focus-badge hidden" title="Focus mode on — click to turn off" aria-label="Focus mode">🌙</button>
                 <div id="pet-zone-head" class="pet-zone pet-zone-head" title="Pet my head — purrs!"></div>
 
                 <svg id="cat-svg-loaf" class="cat-svg cat-loaf-view" viewBox="0 0 120 128" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -259,6 +268,7 @@
 
     <script src="personality.js"></script>
     <script src="appearance.js"></script>
+    <script src="settings.js"></script>
     <script src="cat.js"></script>
     <script src="chat.js"></script>
   </body>

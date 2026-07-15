@@ -18,8 +18,9 @@
   const quitBtn = document.getElementById('quit-btn');
   const contextMenu = document.getElementById('context-menu');
 
-  const BOWL_COOLDOWN_MS = 20 * 60 * 1000; // 20 minutes
+  const BOWL_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
   const BOWL_COOLDOWN_KEY = 'meowBowlCooldownUntil';
+  const FOOD_PREFS_KEY = 'meowFoodPrefs';
   const COMPACT_H = 240;
   const BREAK_ALERT_H = 327;
 
@@ -36,6 +37,10 @@
   let foodMood = null;        // 'good' | 'grumpy' | null
   let foodMoodTimeout = null;
   let awaitingFoodChoice = false;
+  let isFocusMode = false;
+  let foodPrefs = { plain: 0, fishy: 0 };
+  let eyeThrottle = 0;
+  let idleLoopInterval = null;
   let sleepTimeout = null;
   let eatTimeout = null;
   let activityTimeout = null;
@@ -78,7 +83,7 @@
     '👆 Right-click → hide',
     '× near ear → quit',
     '⏰ 2 hrs work → break nudge',
-    '🐟 Bowl cooldown: 20 min',
+    '🐟 Bowl cooldown: 5 min',
     '👀 Eyes follow cursor',
     '👗 Chat → change my look',
     '💻 I do my own thing~',
@@ -232,6 +237,73 @@
     }
   }
 
+  /* ── Food preferences (learned over time) ── */
+  function loadFoodPrefs() {
+    try {
+      const raw = localStorage.getItem(FOOD_PREFS_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (typeof saved.plain === 'number') foodPrefs.plain = Math.max(-5, Math.min(5, saved.plain));
+      if (typeof saved.fishy === 'number') foodPrefs.fishy = Math.max(-5, Math.min(5, saved.fishy));
+    } catch (_) { /* ignore */ }
+  }
+
+  function saveFoodPrefs() {
+    localStorage.setItem(FOOD_PREFS_KEY, JSON.stringify(foodPrefs));
+  }
+
+  function getLikeChance(foodType) {
+    const pref = foodPrefs[foodType] || 0;
+    return Math.max(0.05, Math.min(0.95, 0.5 + pref / 10));
+  }
+
+  function updateFoodPref(foodType, liked) {
+    if (!foodPrefs[foodType] && foodPrefs[foodType] !== 0) return;
+    foodPrefs[foodType] = Math.max(-5, Math.min(5, foodPrefs[foodType] + (liked ? 1 : -1)));
+    saveFoodPrefs();
+  }
+
+  function updateFoodStars() {
+    foodChoice?.querySelectorAll('.food-opt').forEach((btn) => {
+      const type = btn.dataset.food;
+      const star = btn.querySelector('.food-star');
+      if (!star) return;
+      const show = (foodPrefs[type] || 0) >= 3;
+      star.classList.toggle('hidden', !show);
+    });
+  }
+
+  function isReducedMotion() {
+    return document.body.dataset.reducedMotion === 'true' ||
+      window.meowSettings?.reducedMotion;
+  }
+
+  function getSettings() {
+    return window.MeowSettings?.get?.() || window.meowSettings || {
+      focusMode: isFocusMode,
+      chattyLevel: 'normal',
+      reducedMotion: false,
+      snoozeDuration: 30,
+    };
+  }
+
+  function setFocusMode(value) {
+    isFocusMode = !!value;
+    document.getElementById('focus-badge')?.classList.toggle('hidden', !isFocusMode);
+  }
+
+  function getIdleIntervalMs() {
+    const level = getSettings().chattyLevel;
+    if (window.meowBatterySaver) return Math.max(18000, getChattyInterval(level) * 2);
+    return getChattyInterval(level);
+  }
+
+  function getChattyInterval(level) {
+    if (level === 'quiet') return 25000;
+    if (level === 'chatty') return 7000;
+    return 9000;
+  }
+
   /* ── Eye tracking ── */
   function eyesShouldReset() {
     if (isSleeping || isEating) return true;
@@ -276,8 +348,17 @@
     }
   }
 
-  /* Continuous loop — never self-terminates so eyes always respond to cursor */
+  /* Continuous loop — throttles on battery / reduced motion */
   function eyeTrackingLoop() {
+    const throttle = isReducedMotion() || window.meowBatterySaver;
+    if (throttle) {
+      eyeThrottle += 1;
+      if (eyeThrottle % 6 !== 0) {
+        eyeLoopId = requestAnimationFrame(eyeTrackingLoop);
+        return;
+      }
+    }
+
     if (eyesShouldReset()) {
       resetEyes();
     } else {
@@ -344,7 +425,7 @@
   /* ── Idle activities (cat's own business) ── */
   function canDoActivity() {
     return !isChatOpen() && !animLock && !isSleeping && !isEating &&
-      !isPetting && !breakAlertActive && !isBusy;
+      !isPetting && !breakAlertActive && !isBusy && !isFocusMode && !getSettings().focusMode;
   }
 
   function stopActivity() {
@@ -455,6 +536,7 @@
 
   /* ── Petting ── */
   function spawnHeart(x, y) {
+    if (isReducedMotion()) return;
     const heart = document.createElement('span');
     heart.className = 'pet-heart';
     heart.textContent = ['💕', '💖', '💗', '✨', '🩷', '😻'][Math.floor(Math.random() * 6)];
@@ -530,6 +612,7 @@
     if (isBowlOnCooldown() || isSleeping || isEating || isChatOpen()) return;
     awaitingFoodChoice = true;
     hideSpeech();
+    updateFoodStars();
     foodChoice?.classList.remove('hidden');
     setExpression('excited');
   }
@@ -565,8 +648,11 @@
       stopEating();
       startBowlCooldown();
 
-      const liked = Math.random() < 0.5;
       const type = foodType || (Math.random() < 0.5 ? 'plain' : 'fishy');
+      const liked = Math.random() < getLikeChance(type);
+      updateFoodPref(type, liked);
+      updateFoodStars();
+
       const lines = FOOD_REACTIONS[type][liked ? 'like' : 'dislike'];
       const reaction = lines[Math.floor(Math.random() * lines.length)];
 
@@ -704,11 +790,17 @@
   }
 
   function startIdleBehaviorLoop() {
-    setInterval(() => {
+    if (idleLoopInterval) clearInterval(idleLoopInterval);
+
+    const tick = () => {
+      const settings = getSettings();
+      if (settings.focusMode || isFocusMode) return;
       if (isChatOpen() || isSleeping || isEating || isPetting || breakAlertActive || awaitingFoodChoice) return;
 
+      const level = settings.chattyLevel || 'normal';
+
       /* Mood speech overrides normal behaviour sometimes */
-      if (foodMood && Math.random() < 0.35) {
+      if (foodMood && Math.random() < (level === 'quiet' ? 0.15 : 0.35)) {
         const lines = foodMood === 'good' ? GOOD_MOOD_LINES : GRUMPY_MOOD_LINES;
         showSpeech(lines[Math.floor(Math.random() * lines.length)], 3500);
         if (foodMood === 'good') { setExpression('excited'); playAnimation('wiggle', 400); }
@@ -718,25 +810,48 @@
 
       const roll = Math.random();
 
+      if (level === 'quiet') {
+        if (!isBusy && !animLock && roll < 0.25) {
+          startRandomActivity();
+        } else if (!isBusy && !animLock && roll < 0.4) {
+          goToSleep(15000 + Math.random() * 10000);
+        } else if (!isBusy && roll < 0.55) {
+          playRandomAnimation();
+        }
+        return;
+      }
+
+      const begCap = level === 'chatty' ? 0.58 : 0.55;
+      const eatCap = level === 'chatty' ? 0.64 : 0.61;
+      const sleepCap = level === 'chatty' ? 0.7 : 0.67;
+      const animCap = level === 'chatty' ? 0.85 : 0.78;
+      const quipCap = level === 'chatty' ? 0.8 : 0.72;
+
       if (!isBusy && !animLock && roll < 0.35) {
         startRandomActivity();
       } else if (!isBusy && !animLock && roll < 0.47) {
         startWalk();
-      } else if (!isBusy && !animLock && roll < 0.55 && !isBowlOnCooldown()) {
+      } else if (!isBusy && !animLock && roll < begCap && !isBowlOnCooldown()) {
         begForFood();
-      } else if (!isBusy && !animLock && roll < 0.61) {
+      } else if (!isBusy && !animLock && roll < eatCap) {
         goToEat();
-      } else if (!isBusy && !animLock && roll < 0.67) {
+      } else if (!isBusy && !animLock && roll < sleepCap) {
         goToSleep(15000 + Math.random() * 10000);
-      } else if (!isBusy && roll < 0.78) {
+      } else if (!isBusy && roll < animCap) {
         playRandomAnimation();
-        if (roll < 0.72) {
+        if (roll < quipCap) {
           const quip = MeowPersonality.getIdleQuip();
           setExpression(quip.expression);
           showSpeech(quip.text, 3500);
         }
       }
-    }, 9000);
+    };
+
+    idleLoopInterval = setInterval(tick, getIdleIntervalMs());
+  }
+
+  function restartIdleLoop() {
+    startIdleBehaviorLoop();
   }
 
   function setupPetZone(zone, handler) {
@@ -761,6 +876,7 @@
 
   /* ── Break reminder (2h continuous work) ── */
   function spawnBreakSparkle() {
+    if (isReducedMotion()) return;
     const rect = catContainer.getBoundingClientRect();
     const sparkle = document.createElement('span');
     sparkle.className = 'break-sparkle';
@@ -787,7 +903,7 @@
     return document.getElementById('buddy-stack');
   }
 
-  function triggerBreakAlert({ hours, minutes }) {
+  function triggerBreakAlert({ hours, minutes, gentle }) {
     if (breakAlertActive) return;
     breakAlertActive = true;
 
@@ -804,36 +920,50 @@
     const m = minutes || 0;
     const msgFn = BREAK_MESSAGES[Math.floor(Math.random() * BREAK_MESSAGES.length)];
     const msg = msgFn(h, m);
+    const softMode = !!gentle || isReducedMotion();
 
     const breakAlert = document.getElementById('break-alert');
     const breakText = document.getElementById('break-alert-text');
     if (breakText) breakText.textContent = msg;
     breakAlert?.classList.remove('hidden');
 
-    showSpeech(msg, 14000);
+    showSpeech(msg, softMode ? 8000 : 14000);
     window.meowAPI?.resizeWindow(220, BREAK_ALERT_H, true);
-    catContainer.classList.add('break-alert-active');
-    buddyStack()?.classList.add('break-glow');
 
-    const attentionAnims = ['alert', 'hop', 'bounce', 'wiggle', 'jump', 'pawWave', 'headTiltL', 'headTiltR'];
-    let animIdx = 0;
-    playAnimation(attentionAnims[0], 500);
+    if (!softMode) {
+      catContainer.classList.add('break-alert-active');
+      buddyStack()?.classList.add('break-glow');
 
-    breakAnimInterval = setInterval(() => {
-      animIdx += 1;
-      playAnimation(attentionAnims[animIdx % attentionAnims.length], 550);
-      if (animIdx % 2 === 0) spawnBreakSparkle();
-      spawnHeart(
-        catContainer.getBoundingClientRect().left + 40 + Math.random() * 40,
-        catContainer.getBoundingClientRect().top + 20
-      );
-    }, 750);
+      const attentionAnims = ['alert', 'hop', 'bounce', 'wiggle', 'jump', 'pawWave', 'headTiltL', 'headTiltR'];
+      let animIdx = 0;
+      playAnimation(attentionAnims[0], 500);
 
-    breakGlowInterval = setInterval(() => spawnBreakSparkle(), 400);
+      breakAnimInterval = setInterval(() => {
+        animIdx += 1;
+        playAnimation(attentionAnims[animIdx % attentionAnims.length], 550);
+        if (animIdx % 2 === 0) spawnBreakSparkle();
+        spawnHeart(
+          catContainer.getBoundingClientRect().left + 40 + Math.random() * 40,
+          catContainer.getBoundingClientRect().top + 20
+        );
+      }, 750);
+
+      breakGlowInterval = setInterval(() => spawnBreakSparkle(), 400);
+    } else {
+      playAnimation('alert', 500);
+    }
 
     setTimeout(() => {
       if (breakAlertActive) stopBreakAlert();
-    }, 20000);
+    }, softMode ? 12000 : 20000);
+  }
+
+  function snoozeBreak(mins) {
+    stopBreakAlert();
+    const duration = mins || getSettings().snoozeDuration || 30;
+    window.meowAPI?.snoozeBreakReminder?.(duration);
+    showSpeech(`Okay~ Snoozed ${duration} min. 😴`, 3000);
+    playAnimation('yawn', 700);
   }
 
   /* ── Event listeners ── */
@@ -893,7 +1023,7 @@
   setupPetZone(petZoneHead, petHead);
 
   catFigure.addEventListener('click', (e) => {
-    if (e.target.closest('.pet-zone') || e.target.closest('#food-bowl') || e.target.closest('.quit-x')) return;
+    if (e.target.closest('.pet-zone') || e.target.closest('#food-bowl') || e.target.closest('.quit-x') || e.target.closest('.focus-badge')) return;
     if (hasMoved) return;
     e.stopPropagation();
     if (wakeUp()) return;
@@ -909,7 +1039,7 @@
   });
 
   catContainer.addEventListener('mousedown', (e) => {
-    if (e.target.closest('.quit-x') || e.target.closest('.chat-panel') ||
+    if (e.target.closest('.quit-x') || e.target.closest('.focus-badge') || e.target.closest('.chat-panel') ||
         e.target.closest('#food-bowl') || e.target.closest('.pet-zone')) return;
     closeContextMenu();
     isDraggingWindow = true;
@@ -919,6 +1049,13 @@
 
   quitBtn.addEventListener('mousedown', (e) => e.stopPropagation());
   quitBtn.addEventListener('click', (e) => { e.stopPropagation(); quitMeow(); });
+
+  const focusBadge = document.getElementById('focus-badge');
+  focusBadge?.addEventListener('mousedown', (e) => e.stopPropagation());
+  focusBadge?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    window.MeowSettings?.setFocusMode?.(false);
+  });
 
   catContainer.addEventListener('contextmenu', (e) => {
     e.preventDefault();
@@ -952,11 +1089,41 @@
     playAnimation('purr', 700);
   });
 
+  document.querySelectorAll('.break-snooze').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      snoozeBreak(Number(btn.dataset.mins));
+    });
+  });
+
+  window.addEventListener('meow:settings', (e) => {
+    const settings = e.detail?.settings;
+    if (!settings) return;
+    if (typeof settings.focusMode === 'boolean') setFocusMode(settings.focusMode);
+    if (e.detail?.key === 'chattyLevel' || e.detail?.key === 'all') restartIdleLoop();
+  });
+
   if (window.meowAPI?.onBreakReminder) {
     window.meowAPI.onBreakReminder(triggerBreakAlert);
   }
 
+  if (window.meowAPI?.onBatterySaver) {
+    window.meowAPI.onBatterySaver((onBattery) => {
+      window.meowBatterySaver = !!onBattery;
+      restartIdleLoop();
+    });
+  }
+
+  document.addEventListener('fullscreenchange', () => {
+    window.meowAPI?.setFullscreenHint?.(!!document.fullscreenElement);
+  });
+
   loadBowlCooldown();
+  loadFoodPrefs();
+  updateFoodStars();
+
+  const initialSettings = getSettings();
+  setFocusMode(!!initialSettings.focusMode);
 
   setTimeout(() => {
     const greeting = MeowPersonality.getGreeting();
@@ -964,7 +1131,9 @@
     showSpeech(greeting.text, 5000);
   }, 1200);
 
-  setTimeout(() => startRandomActivity(), 18000);
+  setTimeout(() => {
+    if (!isFocusMode && !getSettings().focusMode) startRandomActivity();
+  }, 18000);
 
   startBlinkLoop();
   startIdleBehaviorLoop();
@@ -976,6 +1145,6 @@
     showSpeech, hideSpeech, blink, wakeUp, stopEating,
     playAnimation, playRandomAnimation, triggerBreakAlert,
     stopActivity, startRandomActivity, stopWalk, startWalk, begForFood,
-    showFoodChoice, hideFoodChoice,
+    showFoodChoice, hideFoodChoice, setFocusMode, snoozeBreak,
   };
 })();
