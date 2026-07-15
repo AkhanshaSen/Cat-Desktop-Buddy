@@ -116,10 +116,12 @@ function createCatWindow() {
     y: height - 260,
     frame: false,
     transparent: true,
+    backgroundColor: '#00000000',
     alwaysOnTop: true,
     resizable: false,
     skipTaskbar: true,
     hasShadow: false,
+    ...(process.platform === 'win32' && { thickFrame: false }),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -128,7 +130,10 @@ function createCatWindow() {
   });
 
   catWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
-  catWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+
+  if (process.platform === 'darwin') {
+    catWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  }
 
   catWindow.on('closed', () => {
     catWindow = null;
@@ -174,7 +179,12 @@ function createTray() {
   ]);
 
   tray.setContextMenu(contextMenu);
-  tray.on('click', toggleCatWindow);
+  // Windows: left-click opens menu; macOS: left-click toggles visibility
+  if (process.platform === 'win32') {
+    tray.on('double-click', toggleCatWindow);
+  } else {
+    tray.on('click', toggleCatWindow);
+  }
 }
 
 ipcMain.on('window-drag', (_event, { deltaX, deltaY }) => {
