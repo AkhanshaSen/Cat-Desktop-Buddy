@@ -1,5 +1,7 @@
 const { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, powerMonitor } = require('electron');
 const path = require('path');
+const agent = require('./main/agent');
+const agentConfig = require('./main/agent-config');
 
 let catWindow = null;
 let tray = null;
@@ -283,6 +285,19 @@ ipcMain.on('settings-updated', (_event, settings) => {
 ipcMain.on('fullscreen-hint', (_event, { isFullscreen }) => {
   fullscreenHint = !!isFullscreen;
 });
+
+// ── Agent IPC (async request/response) ──
+ipcMain.handle('agent:chat', async (_event, { message, history }) => {
+  try {
+    return await agent.handleChat({ message, history });
+  } catch (_) {
+    return null;
+  }
+});
+
+ipcMain.handle('agent:get-config', () => agentConfig.publicView());
+
+ipcMain.handle('agent:set-config', (_event, partial) => agentConfig.save(partial || {}));
 
 if (gotSingleInstanceLock) {
   app.whenReady().then(() => {

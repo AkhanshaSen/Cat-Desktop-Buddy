@@ -26,7 +26,7 @@
   const COMPACT_SIZE = { width: 220, height: 240 };
   const CHAT_SIZE = { width: 220, height: 442 };
   const LOOK_SIZE = { width: 220, height: 344 };
-  const SETTINGS_SIZE = { width: 220, height: 360 };
+  const SETTINGS_SIZE = { width: 220, height: 476 };
 
   function resizeWindow(size, anchorBottom = false) {
     if (window.meowAPI?.resizeWindow) {
@@ -140,7 +140,21 @@
     if (el) el.remove();
   }
 
-  function typeAndRespond(userText) {
+  function renderResponse(response, fromAgent) {
+    removeTypingIndicator();
+    addMessage('meow', response.text);
+    window.MeowCat.setExpression(response.expression || 'happy');
+
+    if (fromAgent) {
+      if (response.actionTaken) window.MeowCat.bounce();
+    } else if (response.sentiment === 'good' || response.sentiment === 'motivate') {
+      window.MeowCat.wiggle();
+    } else if (response.sentiment === 'love' || response.sentiment === 'cute') {
+      window.MeowCat.bounce();
+    }
+  }
+
+  async function typeAndRespond(userText) {
     addMessage('user', userText);
     chatInput.value = '';
 
@@ -148,24 +162,32 @@
     window.MeowCat.blink();
     addTypingIndicator();
 
-    setTimeout(() => {
-      removeTypingIndicator();
-      try {
-        const response = MeowPersonality.respond(userText);
-        addMessage('meow', response.text);
-        window.MeowCat.setExpression(response.expression);
+    const minDelay = new Promise((r) => setTimeout(r, 400 + Math.random() * 400));
 
-        if (response.sentiment === 'good' || response.sentiment === 'motivate') {
-          window.MeowCat.wiggle();
-        } else if (response.sentiment === 'love' || response.sentiment === 'cute') {
-          window.MeowCat.bounce();
-        }
+    let agentResponse = null;
+    if (window.meowAPI?.agentChat) {
+      try {
+        const history = loadChatHistory().slice(-6);
+        agentResponse = await window.meowAPI.agentChat(userText, history);
       } catch (err) {
-        console.error('Meow response error:', err);
-        addMessage('meow', "*confused meow* My brain hiccuped! Try again? 🐾");
-        window.MeowCat.setExpression('sad');
+        console.error('Meow agent error:', err);
       }
-    }, 400 + Math.random() * 600);
+    }
+
+    await minDelay;
+
+    try {
+      if (agentResponse && agentResponse.text) {
+        renderResponse(agentResponse, true);
+      } else {
+        renderResponse(MeowPersonality.respond(userText), false);
+      }
+    } catch (err) {
+      console.error('Meow response error:', err);
+      removeTypingIndicator();
+      addMessage('meow', "*confused meow* My brain hiccuped! Try again? 🐾");
+      window.MeowCat.setExpression('sad');
+    }
   }
 
   function sendMessage() {

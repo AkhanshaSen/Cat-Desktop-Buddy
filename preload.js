@@ -16,4 +16,7 @@ contextBridge.exposeInMainWorld('meowAPI', {
   onBatterySaver: (callback) => {
     ipcRenderer.on('battery-saver-changed', (_event, onBattery) => callback(onBattery));
   },
+  agentChat: (message, history) => ipcRenderer.invoke('agent:chat', { message, history }),
+  getAgentConfig: () => ipcRenderer.invoke('agent:get-config'),
+  setAgentConfig: (config) => ipcRenderer.invoke('agent:set-config', config),
 });

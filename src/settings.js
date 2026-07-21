@@ -155,6 +155,27 @@
           <button type="button" class="snooze-pref-btn${current.snoozeDuration === 60 ? ' active' : ''}" data-mins="60">60m</button>
         </div>
       </div>
+
+      <div class="settings-divider"></div>
+
+      <div class="settings-row">
+        <label class="settings-label" for="setting-agent">Let Meow do tasks</label>
+        <label class="toggle">
+          <input type="checkbox" id="setting-agent" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <p class="settings-hint">Ask me to open apps like "open notepad" or "open the camera"</p>
+
+      <div class="settings-row settings-col">
+        <span class="settings-label">OpenAI API key <span class="settings-optional">(optional)</span></span>
+        <div class="agent-key-row">
+          <input type="password" id="setting-agent-key" class="agent-key-input" placeholder="sk-..." autocomplete="off" spellcheck="false" />
+          <button type="button" id="setting-agent-save" class="agent-key-save">Save</button>
+        </div>
+      </div>
+      <p class="settings-hint">Common commands work offline for free. Add a key for natural requests like "pull up something to write in".</p>
+      <p id="agent-status" class="agent-status"></p>
     `;
 
     panel.querySelector('#setting-focus')?.addEventListener('change', (e) => {
@@ -180,6 +201,53 @@
         setSnoozeDuration(Number(btn.dataset.mins));
       });
     });
+
+    const agentToggle = panel.querySelector('#setting-agent');
+    agentToggle?.addEventListener('change', (e) => {
+      e.stopPropagation();
+      setAgentConfig({ agentEnabled: e.target.checked });
+    });
+
+    const keyInput = panel.querySelector('#setting-agent-key');
+    keyInput?.addEventListener('keydown', (e) => e.stopPropagation());
+
+    panel.querySelector('#setting-agent-save')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const value = keyInput?.value.trim();
+      if (!value) return;
+      setAgentConfig({ apiKey: value });
+      keyInput.value = '';
+    });
+
+    refreshAgentStatus();
+  }
+
+  function setAgentConfig(partial) {
+    window.meowAPI?.setAgentConfig?.(partial).then(applyAgentStatus).catch(() => {});
+  }
+
+  function refreshAgentStatus() {
+    window.meowAPI?.getAgentConfig?.().then(applyAgentStatus).catch(() => {});
+  }
+
+  function applyAgentStatus(cfg) {
+    if (!cfg) return;
+    const panel = document.getElementById('settings-panel');
+    if (!panel) return;
+
+    const toggle = panel.querySelector('#setting-agent');
+    if (toggle) toggle.checked = !!cfg.agentEnabled;
+
+    const status = panel.querySelector('#agent-status');
+    if (status) {
+      if (!cfg.agentEnabled) {
+        status.textContent = 'Tasks off — I\'ll just chat.';
+      } else if (cfg.hasApiKey) {
+        status.textContent = 'Ready — offline commands + natural language. ✨';
+      } else {
+        status.textContent = 'Offline mode — common commands work now.';
+      }
+    }
   }
 
   function init() {

@@ -9,6 +9,7 @@ A floating cute cat desktop buddy for **macOS and Windows**. Meow lives on your 
 ## Features
 
 - **Full mini cat** — animated SVG with expressions, eye tracking, and 58+ animations
+- **Little agent** — ask Meow to open apps ("open notepad", "open the camera", "open the calculator") and it launches them on macOS or Windows
 - **Chat dialog** — talk about your day, get motivation, or something cute
 - **Look tab** — change coat color and accessories (hat, bow, scarf, flower, glasses)
 - **Food system** — drag bowl to feed; choose Plain or Fishy; learns your preferences over time
@@ -57,6 +58,31 @@ npm install   # first time only
 npm start
 npm run stop  # if cats won't disappear
 ```
+
+## Meow the little agent
+
+Meow can open and close apps for you. Just type a request in the chat, like:
+
+- "open notepad" / "pull up something to write in"
+- "open the camera" (Photo Booth on macOS, Camera on Windows)
+- "open the calculator", "open the browser", "what time is it?"
+- "close notepad", "quit the calculator", "exit terminal"
+- "what can you do?" — Meow lists everything it knows
+
+Meow maps each request to the matching app on your OS (for example, TextEdit on macOS or Notepad on Windows). Opening uses `open -a` (macOS) or `start` (Windows); closing quits the app gracefully via AppleScript (macOS) or `taskkill` (Windows). Only a fixed allowlist of common apps can be opened or closed — Meow never runs arbitrary commands.
+
+### Common commands are free and offline
+
+The most frequent "open X" commands are recognized on-device, so they work instantly with **no account and no cost**.
+
+### Optional: natural language via OpenAI
+
+For fuzzier phrasing ("open whatever I use to jot things down"), you can add an OpenAI API key in the **Settings** tab (⚙):
+
+1. Get a key from [platform.openai.com](https://platform.openai.com/api-keys).
+2. Open Meow → Settings → paste the key under **OpenAI API key** → **Save**.
+
+The key is stored locally in the app's user-data folder and is used only from the app's main process — it is never sent anywhere except OpenAI. Usage of the OpenAI API is billed by OpenAI (the default `gpt-4o-mini` model is inexpensive). You can turn the whole feature off with the **Let Meow do tasks** toggle.
 
 ## Windows compatibility
 
