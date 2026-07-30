@@ -116,6 +116,22 @@ const Cat2Clips = (() => {
       bgMode: 'black',
       label: 'Playing with wool ball',
     },
+    jump: {
+      src: `${BASE}/jump.mp4`,
+      loop: false,
+      durationSec: 10,
+      version: 1,
+      bgMode: 'black',
+      label: 'Playful jumping',
+    },
+    scratch: {
+      src: `${BASE}/scratch.mp4`,
+      loop: false,
+      durationSec: 10,
+      version: 1,
+      bgMode: 'black',
+      label: 'Scratching furniture',
+    },
   };
 
   function get(name) {
@@ -137,6 +153,8 @@ const Cat2Clips = (() => {
     if (dataset.playing === 'earpurr') return 'earpurr';
     if (dataset.playing === 'grumpy') return 'grumpy';
     if (dataset.playing === 'woolball') return 'woolball';
+    if (dataset.playing === 'jump') return 'jump';
+    if (dataset.playing === 'scratch') return 'scratch';
     if (dataset.playing === 'pet') return 'pet';
     if (dataset.pose === 'sleep' || dataset.sleeping === 'true') return 'sleep';
     return DEFAULT_CLIP;

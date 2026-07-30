@@ -110,11 +110,12 @@
       document.getElementById('cat')?.dataset.begging === 'true';
     if (!petting) {
       if (window.MeowCat.wakeUp) window.MeowCat.wakeUp();
-      if (window.MeowCat.stopEating) window.MeowCat.stopEating();
+      if (!feedPending && window.MeowCat.stopEating) window.MeowCat.stopEating();
       if (window.MeowCat.stopWalk) window.MeowCat.stopWalk();
       if (!feedPending && window.MeowCat.stopActivity) window.MeowCat.stopActivity();
     }
     if (!feedPending && window.MeowCat.hideFoodChoice) window.MeowCat.hideFoodChoice();
+    if (feedPending) window.MeowCat.refreshFeedPromptAfterChat?.();
     switchTab('chat');
 
     if (!greeted) {
@@ -129,6 +130,12 @@
     isOpen = false;
     chatPanel.classList.add('hidden');
     resizeWindow(COMPACT_SIZE, true);
+    const feedPending = window.MeowCat.isAwaitingFoodChoice?.() ||
+      window.MeowCat.isFeedBegging?.() ||
+      document.getElementById('cat')?.dataset.begging === 'true';
+    if (feedPending) {
+      window.MeowCat.refreshFeedPromptAfterChat?.();
+    }
   }
 
   function addMessage(role, text, persist = true) {
@@ -208,6 +215,7 @@
   function sendMessage() {
     const text = chatInput.value.trim();
     if (!text) return;
+    window.dispatchEvent(new CustomEvent('meow:chat-send', { detail: { text } }));
     typeAndRespond(text);
   }
 
@@ -224,9 +232,14 @@
 
   closeChat.addEventListener('click', (e) => {
     e.stopPropagation();
+    const feedPending = window.MeowCat.isAwaitingFoodChoice?.() ||
+      window.MeowCat.isFeedBegging?.() ||
+      document.getElementById('cat')?.dataset.begging === 'true';
     closeChatPanel();
-    window.MeowCat.setExpression('happy');
-    window.MeowCat.showSpeech('Mrow! Come back anytime~ 🐾', 3000);
+    if (!feedPending) {
+      window.MeowCat.setExpression('happy');
+      window.MeowCat.showSpeech('Mrow! Come back anytime~ 🐾', 3000);
+    }
   });
 
   quickBtns.forEach((btn) => {

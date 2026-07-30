@@ -7,12 +7,14 @@
   const isCat2 = () => !!document.getElementById('cat2-canvas-a') ||
     document.getElementById('cat')?.classList.contains('cat2-mode');
 
+  const FEED_INTERVAL_OPTIONS = [2, 5, 10, 15, 30];
+
   const DEFAULTS = {
     focusMode: false,
     chattyLevel: 'normal', // quiet | normal | chatty
     reducedMotion: false,
     snoozeDuration: 30, // minutes: 10 | 30 | 60
-    feedIntervalMinutes: 5, // Cat 2: 5 | 10 | 15 | 30
+    feedIntervalMinutes: 5, // Cat 2: 2 | 5 | 10 | 15 | 30
     catSounds: true, // Cat 2: meow clip audio
   };
 
@@ -31,7 +33,7 @@
       if ([10, 30, 60].includes(saved.snoozeDuration)) {
         current.snoozeDuration = saved.snoozeDuration;
       }
-      if ([5, 10, 15, 30].includes(saved.feedIntervalMinutes)) {
+      if (FEED_INTERVAL_OPTIONS.includes(saved.feedIntervalMinutes)) {
         current.feedIntervalMinutes = saved.feedIntervalMinutes;
       }
       if (typeof saved.catSounds === 'boolean') {
@@ -108,7 +110,7 @@
   }
 
   function setFeedIntervalMinutes(mins) {
-    if (![5, 10, 15, 30].includes(mins)) return;
+    if (!FEED_INTERVAL_OPTIONS.includes(mins)) return;
     current.feedIntervalMinutes = mins;
     save();
     notifyChange('feedIntervalMinutes');
@@ -240,13 +242,14 @@
       <div class="settings-row settings-col">
         <span class="settings-label">Feed me reminder</span>
         <div class="segmented">
+          <button type="button" class="feed-interval-btn${current.feedIntervalMinutes === 2 ? ' active' : ''}" data-mins="2">2m</button>
           <button type="button" class="feed-interval-btn${current.feedIntervalMinutes === 5 ? ' active' : ''}" data-mins="5">5m</button>
           <button type="button" class="feed-interval-btn${current.feedIntervalMinutes === 10 ? ' active' : ''}" data-mins="10">10m</button>
           <button type="button" class="feed-interval-btn${current.feedIntervalMinutes === 15 ? ' active' : ''}" data-mins="15">15m</button>
           <button type="button" class="feed-interval-btn${current.feedIntervalMinutes === 30 ? ' active' : ''}" data-mins="30">30m</button>
         </div>
       </div>
-      <p class="settings-hint">How long between &ldquo;Please feed me&rdquo; prompts (after you tap Yes or No)</p>
+      <p class="settings-hint">How long between &ldquo;Please feed me&rdquo; prompts (2&ndash;30 min, after you tap Yes or No)</p>
 
       <div class="settings-row">
         <label class="settings-label" for="setting-sounds">Cat sounds</label>

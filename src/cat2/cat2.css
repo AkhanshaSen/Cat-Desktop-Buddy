@@ -122,10 +122,70 @@ body[data-reduced-motion] #cat.cat2-mode .hunger-meter-fill {
   position: relative;
 }
 
+#cat.cat2-mode.feed-prompt-open .speech-bubble {
+  pointer-events: none;
+  visibility: hidden;
+}
+
+#cat.cat2-mode.scratch-active {
+  z-index: 50;
+  position: relative;
+}
+
 #cat.cat2-mode.feed-prompt-open .food-choice,
 #cat.cat2-mode .food-choice:not(.hidden) {
   z-index: 50;
   pointer-events: auto;
+}
+
+#cat.cat2-mode.scratch-active .scratch-stop-prompt,
+#cat.cat2-mode .scratch-stop-prompt:not(.hidden) {
+  z-index: 50;
+  pointer-events: auto;
+}
+
+.scratch-stop-prompt {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 16;
+  text-align: center;
+  animation: bubblePop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.scratch-stop-prompt.hidden {
+  display: none;
+}
+
+.scratch-stop-btn {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 6px 12px;
+  border-radius: 12px;
+  border: 1.5px solid rgba(255, 120, 100, 0.75);
+  background: rgba(255, 248, 245, 0.96);
+  color: #a04030;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(255, 100, 80, 0.22);
+  white-space: nowrap;
+  transition: background 0.15s, transform 0.12s, border-color 0.15s;
+}
+
+.scratch-stop-btn:hover {
+  background: rgba(255, 220, 210, 0.98);
+  transform: scale(1.06);
+  border-color: #ff7050;
+}
+
+body[data-reduced-motion] .scratch-stop-prompt {
+  animation: none !important;
+  opacity: 1 !important;
+  transform: translateX(-50%) scale(1) !important;
+}
+
+.quick-stop-scratch.hidden {
+  display: none;
 }
 
 #cat.cat2-mode .quit-x { left: auto; right: 4px; }

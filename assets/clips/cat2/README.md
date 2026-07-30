@@ -18,6 +18,8 @@ Drop processed **MP4** clips here. Transparency is handled at runtime via canvas
 | `earpurr.mp4` | Purring and scratching ears, silent (one-shot, ~5s) |
 | `grumpy.mp4` | Grumpy at human, silent (one-shot, ~5s) |
 | `woolball.mp4` | Playing with wool ball, silent (one-shot, ~10s) |
+| `jump.mp4` | Playful jumping, silent (one-shot, ~10s) |
+| `scratch.mp4` | Scratching furniture, silent (one-shot, ~10s) |
 | `sleep.mp4` | Sleeping — first 3s trimmed from source (loop) |
 
 ## Process from source videos

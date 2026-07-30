@@ -36,6 +36,7 @@
                 <button class="quick-btn" data-prompt="How was your day?">☀️ Day</button>
                 <button class="quick-btn" data-prompt="I need motivation">💪 Boost</button>
                 <button class="quick-btn" data-prompt="Tell me something cute">💕 Cute</button>
+                <button id="quick-stop-scratch" class="quick-btn quick-stop-scratch hidden" data-action="stop-scratch" title="Tell the cat to stop scratching furniture">🛑 Stop scratching!</button>
               </div>
             </div>
           </div>
@@ -66,6 +67,12 @@
                 <button class="food-opt feed-no" data-feed="no" title="Decline feeding">No</button>
               </div>
               <div class="bubble-tail"></div>
+            </div>
+
+            <div id="scratch-stop-prompt" class="scratch-stop-prompt hidden" aria-live="polite">
+              <button id="scratch-stop-btn" class="scratch-stop-btn" type="button" title="Tell the cat to stop scratching">
+                Stop scratching!
+              </button>
             </div>
 
             <div class="zzz-bubble hidden" aria-hidden="true">
