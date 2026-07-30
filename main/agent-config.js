@@ -1,17 +1,18 @@
 /**
  * Persisted agent configuration (main process only).
  *
- * The OpenAI API key never leaves the main process — the renderer can update
+ * The Gemini API key never leaves the main process — the renderer can update
  * it and query whether one exists, but can never read it back.
  */
 const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
+const gemini = require('./gemini');
 
 const DEFAULTS = {
   agentEnabled: true,
   apiKey: '',
-  model: 'gpt-4o-mini',
+  model: 'gemini-2.0-flash',
 };
 
 let cache = null;
@@ -60,10 +61,12 @@ function save(partial) {
 // Never expose the raw key to the renderer.
 function publicView() {
   const c = load();
+  const health = gemini.getLastHealth();
   return {
     agentEnabled: c.agentEnabled,
     hasApiKey: !!c.apiKey,
     model: c.model,
+    geminiHealth: health,
   };
 }
 

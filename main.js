@@ -3,8 +3,32 @@ const path = require('path');
 const agent = require('./main/agent');
 const agentConfig = require('./main/agent-config');
 
+const IS_CAT2 = process.env.MEOW_VARIANT === 'cat2' || process.argv.includes('--cat2');
+
+if (IS_CAT2) {
+  app.setName('AI Meow 2');
+  app.setPath('userData', path.join(app.getPath('appData'), 'ai-meow-cat2'));
+}
+
 let catWindow = null;
 let tray = null;
+
+function toSafeInt(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.round(n) : fallback;
+}
+
+function moveCatWindow(deltaX, deltaY) {
+  if (!catWindow) return;
+  const dx = toSafeInt(deltaX, 0);
+  const dy = toSafeInt(deltaY, 0);
+  if (dx === 0 && dy === 0) return;
+
+  const [x, y] = catWindow.getPosition();
+  const nextX = toSafeInt(x, 0) + dx;
+  const nextY = toSafeInt(y, 0) + dy;
+  catWindow.setPosition(nextX, nextY);
+}
 
 // ── Continuous work tracker (global mouse/keyboard via system idle time) ──
 const WORK_TRACK_POLL_MS = 15000;
@@ -117,10 +141,20 @@ function startWorkTracker() {
   }
 }
 
-// Only one Meow at a time — prevents duplicate cats when running npm start again
-const gotSingleInstanceLock = app.requestSingleInstanceLock();
-if (!gotSingleInstanceLock) {
-  app.quit();
+// Only one instance per variant — Cat 1 and Cat 2 can run together
+let gotSingleInstanceLock = true;
+if (!IS_CAT2) {
+  gotSingleInstanceLock = app.requestSingleInstanceLock();
+  if (!gotSingleInstanceLock) {
+    app.quit();
+  } else {
+    app.on('second-instance', () => {
+      if (catWindow) {
+        catWindow.show();
+        catWindow.focus();
+      }
+    });
+  }
 } else {
   app.on('second-instance', () => {
     if (catWindow) {
@@ -154,7 +188,7 @@ function createCatWindow() {
 
   catWindow = new BrowserWindow({
     width: 220,
-    height: 240,
+    height: IS_CAT2 ? 218 : 240,
     x: width - 240,
     y: height - 260,
     frame: false,
@@ -172,7 +206,7 @@ function createCatWindow() {
     },
   });
 
-  catWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
+  catWindow.loadFile(path.join(__dirname, 'src', IS_CAT2 ? 'index-cat2.html' : 'index.html'));
 
   catWindow.webContents.on('did-finish-load', () => {
     pushBatteryStatus();
@@ -200,11 +234,12 @@ function toggleCatWindow() {
 function createTray() {
   const icon = createTrayIcon();
   tray = new Tray(icon);
-  tray.setToolTip('AI Meow — click to show/hide');
+  const appLabel = IS_CAT2 ? 'AI Meow 2' : 'AI Meow';
+  tray.setToolTip(`${appLabel} — click to show/hide`);
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Show Meow',
+      label: IS_CAT2 ? 'Show Meow 2' : 'Show Meow',
       click: () => {
         if (catWindow) {
           catWindow.show();
@@ -213,14 +248,14 @@ function createTray() {
       },
     },
     {
-      label: 'Hide Meow',
+      label: IS_CAT2 ? 'Hide Meow 2' : 'Hide Meow',
       click: () => {
         if (catWindow) catWindow.hide();
       },
     },
     { type: 'separator' },
     {
-      label: 'Quit AI Meow',
+      label: IS_CAT2 ? 'Quit AI Meow 2' : 'Quit AI Meow',
       click: () => app.quit(),
     },
   ]);
@@ -234,10 +269,8 @@ function createTray() {
   }
 }
 
-ipcMain.on('window-drag', (_event, { deltaX, deltaY }) => {
-  if (!catWindow) return;
-  const [x, y] = catWindow.getPosition();
-  catWindow.setPosition(x + deltaX, y + deltaY);
+ipcMain.on('window-drag', (_event, payload = {}) => {
+  moveCatWindow(payload.deltaX, payload.deltaY);
 });
 
 ipcMain.on('window-minimize', () => {
@@ -248,15 +281,18 @@ ipcMain.on('app-quit', () => {
   app.quit();
 });
 
-ipcMain.on('window-resize', (_event, { width, height, anchorBottom }) => {
+ipcMain.on('window-resize', (_event, payload = {}) => {
   if (!catWindow) return;
+  const width = toSafeInt(payload.width, 220);
+  const height = toSafeInt(payload.height, 240);
+  const anchorBottom = !!payload.anchorBottom;
   const [x, y] = catWindow.getPosition();
   const [, currentHeight] = catWindow.getSize();
 
   if (anchorBottom) {
     catWindow.setBounds({
-      x,
-      y: y + currentHeight - height,
+      x: toSafeInt(x, 0),
+      y: toSafeInt(y, 0) + toSafeInt(currentHeight, height) - height,
       width,
       height,
     });
@@ -299,6 +335,8 @@ ipcMain.handle('agent:get-config', () => agentConfig.publicView());
 
 ipcMain.handle('agent:set-config', (_event, partial) => agentConfig.save(partial || {}));
 
+ipcMain.handle('agent:test-gemini', async () => agent.runHealthCheck());
+
 if (gotSingleInstanceLock) {
   app.whenReady().then(() => {
     if (process.platform === 'darwin' && app.dock) {
@@ -308,6 +346,10 @@ if (gotSingleInstanceLock) {
     createCatWindow();
     createTray();
     startWorkTracker();
+
+    agent.runHealthCheck().then((health) => {
+      if (health) console.log('[Meow] Gemini health:', health.ok ? health.message : `${health.reason}: ${health.message}`);
+    }).catch(() => {});
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {

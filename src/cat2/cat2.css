@@ -1,0 +1,140 @@
+/* Cat 2 — canvas video figure (Cat 1 SVG rules untouched) */
+
+body:has(#cat.cat2-mode) #app {
+  padding-top: 10px;
+}
+
+#cat.cat2-mode .cat2-video-layer {
+  position: relative;
+  width: 175px;
+  height: 115px;
+  margin: 0 auto;
+  pointer-events: none;
+}
+
+#cat.cat2-mode .cat2-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  opacity: 0;
+  transition: opacity 0.45s ease-in-out;
+  pointer-events: none;
+  background: transparent !important;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  z-index: 1;
+}
+
+#cat.cat2-mode .cat2-canvas.cat2-video-visible {
+  opacity: 1;
+}
+
+#cat.cat2-mode .cat2-canvas.cat2-crossfade-top {
+  z-index: 2;
+}
+
+#cat.cat2-mode .cat2-video-source {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+#cat.cat2-mode .cat-svg,
+#cat.cat2-mode .activity-props,
+#cat.cat2-mode .food-bowl {
+  display: none !important;
+}
+
+#cat.cat2-mode .cat-figure {
+  width: 175px;
+  min-height: 118px;
+}
+
+#cat.cat2-mode .quit-x { left: auto; right: 4px; }
+#cat.cat2-mode .focus-badge { left: 4px; }
+
+#cat.cat2-mode .pet-zone-head {
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 72px;
+  height: 52px;
+  z-index: 10;
+}
+
+#cat.cat2-mode .pet-hearts {
+  display: block;
+}
+
+#cat.cat2-mode.walking-left .cat-figure,
+#cat.cat2-mode.walking-right .cat-figure {
+  animation: none !important;
+  transform: none !important;
+}
+
+#cat.cat2-mode.walking-left .cat2-video-layer,
+#cat.cat2-mode.walking-right .cat2-video-layer {
+  animation: none;
+  transform-origin: center bottom;
+  will-change: auto;
+}
+
+#cat.cat2-mode.walking-left .cat2-video-layer {
+  transform: scaleX(-1);
+}
+
+#cat.cat2-mode[data-pose="sleep"] .zzz-bubble {
+  display: flex;
+}
+
+#cat.cat2-mode[data-pose="eat"] .nom-float.show {
+  display: block;
+}
+
+body[data-reduced-motion] #cat.cat2-mode .cat2-canvas {
+  transition: none;
+}
+
+body[data-reduced-motion] #cat.cat2-mode.walking-left .cat2-video-layer,
+body[data-reduced-motion] #cat.cat2-mode.walking-right .cat2-video-layer {
+  animation: none;
+}
+
+#cat.cat2-mode .food-opt.feed-yes {
+  background: rgba(198, 240, 210, 0.95);
+  border-color: rgba(90, 180, 120, 0.65);
+  color: #2a6040;
+}
+
+#cat.cat2-mode .food-opt.feed-no {
+  background: rgba(255, 228, 235, 0.95);
+  border-color: rgba(255, 143, 171, 0.65);
+  color: #804060;
+}
+
+#cat.cat2-mode[data-begging="true"] .cat-figure {
+  cursor: default;
+}
+
+#cat.cat2-mode[data-sleeping="true"] .zzz-bubble {
+  display: flex;
+}
+
+#cat.cat2-mode[data-mood="good"] .cat2-canvas.cat2-video-visible {
+  filter: drop-shadow(0 0 6px rgba(255, 200, 80, 0.45));
+}
+
+#cat.cat2-mode[data-mood="grumpy"] .cat2-canvas.cat2-video-visible {
+  filter: drop-shadow(0 0 6px rgba(100, 100, 180, 0.35)) saturate(0.85);
+}
+
+.cat-container:has(#cat.cat2-mode) .chat-panel .settings-panel:not(.hidden) {
+  max-height: 330px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}

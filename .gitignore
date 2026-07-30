@@ -2,3 +2,5 @@ node_modules/
 .DS_Store
 dist/
 *.log
+assets/cat2/_tmp/
+assets/**/_tmp/

@@ -1,11 +1,20 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('meowAPI', {
-  dragWindow: (deltaX, deltaY) => ipcRenderer.send('window-drag', { deltaX, deltaY }),
+  dragWindow: (deltaX, deltaY) => {
+    const dx = Math.round(Number(deltaX) || 0);
+    const dy = Math.round(Number(deltaY) || 0);
+    if (dx === 0 && dy === 0) return;
+    ipcRenderer.send('window-drag', { deltaX: dx, deltaY: dy });
+  },
   hideWindow: () => ipcRenderer.send('window-minimize'),
   quitApp: () => ipcRenderer.send('app-quit'),
   resizeWindow: (width, height, anchorBottom = false) =>
-    ipcRenderer.send('window-resize', { width, height, anchorBottom }),
+    ipcRenderer.send('window-resize', {
+      width: Math.round(Number(width) || 220),
+      height: Math.round(Number(height) || 240),
+      anchorBottom: !!anchorBottom,
+    }),
   dismissBreakReminder: () => ipcRenderer.send('break-dismissed'),
   snoozeBreakReminder: (minutes) => ipcRenderer.send('break-snoozed', { minutes }),
   updateSettings: (settings) => ipcRenderer.send('settings-updated', settings),
@@ -19,4 +28,5 @@ contextBridge.exposeInMainWorld('meowAPI', {
   agentChat: (message, history) => ipcRenderer.invoke('agent:chat', { message, history }),
   getAgentConfig: () => ipcRenderer.invoke('agent:get-config'),
   setAgentConfig: (config) => ipcRenderer.invoke('agent:set-config', config),
+  testGemini: () => ipcRenderer.invoke('agent:test-gemini'),
 });

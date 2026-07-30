@@ -23,10 +23,14 @@
   const CHAT_HISTORY_KEY = 'meowChatHistory';
   const MAX_HISTORY = 20;
 
-  const COMPACT_SIZE = { width: 220, height: 240 };
-  const CHAT_SIZE = { width: 220, height: 442 };
+  const isCat2 = () => document.getElementById('cat')?.classList.contains('cat2-mode');
+  const COMPACT_SIZE = {
+    width: 220,
+    height: isCat2() ? 218 : 240,
+  };
+  const CHAT_SIZE = { width: 220, height: isCat2() ? 460 : 442 };
   const LOOK_SIZE = { width: 220, height: 344 };
-  const SETTINGS_SIZE = { width: 220, height: 476 };
+  const SETTINGS_SIZE = { width: 220, height: isCat2() ? 600 : 520 };
 
   function resizeWindow(size, anchorBottom = false) {
     if (window.meowAPI?.resizeWindow) {
@@ -60,7 +64,7 @@
     settingsPanel?.classList.toggle('hidden', tab !== 'settings');
     chatBody?.classList.toggle('hidden', tab !== 'chat');
 
-    if (tab === 'look') {
+    if (tab === 'look' && lookPanel) {
       resizeWindow(LOOK_SIZE, true);
     } else if (tab === 'settings') {
       resizeWindow(SETTINGS_SIZE, true);

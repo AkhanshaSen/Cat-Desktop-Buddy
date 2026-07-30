@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; media-src 'self'"
+    />
+    <title>AI Meow 2</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="cat2/cat2.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="buddy-stack" class="buddy-stack">
+        <div id="cat-container" class="cat-container">
+          <div id="chat-panel" class="chat-panel hidden">
+            <div class="chat-header">
+              <div class="chat-tabs">
+                <button id="tab-chat" class="chat-tab active" title="Chat">🐱 Chat</button>
+                <button id="tab-settings" class="chat-tab" title="Settings">⚙</button>
+              </div>
+              <button id="close-chat" class="icon-btn" title="Close">×</button>
+            </div>
+
+            <div id="settings-panel" class="settings-panel hidden"></div>
+
+            <div id="chat-body" class="chat-body">
+              <div id="chat-messages" class="chat-messages"></div>
+              <div class="chat-input-row">
+                <input id="chat-input" type="text" placeholder="Chat or ask me to open something..." autocomplete="off" maxlength="500" />
+                <button id="send-btn" class="send-btn" title="Send">➤</button>
+              </div>
+              <div class="quick-actions">
+                <button class="quick-btn" data-prompt="How was your day?">☀️ Day</button>
+                <button class="quick-btn" data-prompt="I need motivation">💪 Boost</button>
+                <button class="quick-btn" data-prompt="Tell me something cute">💕 Cute</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="break-alert" class="break-alert hidden" role="alert" aria-live="assertive">
+            <div class="break-alert-inner">
+              <span class="break-alert-icon">⏰</span>
+              <p id="break-alert-text" class="break-alert-text">Break time!</p>
+              <div class="break-actions">
+                <button id="break-dismiss" class="break-dismiss" title="Dismiss">Got it!</button>
+                <button class="break-snooze" data-mins="10" title="Snooze 10 minutes">10m</button>
+                <button class="break-snooze" data-mins="30" title="Snooze 30 minutes">30m</button>
+                <button class="break-snooze" data-mins="60" title="Snooze 60 minutes">60m</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="cat" class="cat cat2-mode" data-expression="happy" data-pose="loaf" data-activity="none">
+            <div id="speech-bubble" class="speech-bubble hidden" aria-live="polite">
+              <p id="speech-text"></p>
+              <div class="bubble-tail"></div>
+            </div>
+
+            <div id="food-choice" class="food-choice hidden" aria-live="polite">
+              <p class="food-choice-label">Please feed me</p>
+              <div class="food-choice-btns">
+                <button class="food-opt feed-yes" data-feed="yes" title="Feed the cat">Yes</button>
+                <button class="food-opt feed-no" data-feed="no" title="Decline feeding">No</button>
+              </div>
+              <div class="bubble-tail"></div>
+            </div>
+
+            <div class="zzz-bubble hidden" aria-hidden="true">
+              <span>z</span><span>z</span><span>Z</span>
+            </div>
+            <div id="pet-hearts" class="pet-hearts" aria-hidden="true"></div>
+
+            <div class="cat-scene">
+              <div id="activity-props" class="activity-props hidden" aria-hidden="true"></div>
+
+              <div id="cat-figure" class="cat-figure">
+                <button id="quit-btn" class="quit-x" title="Quit AI Meow 2" aria-label="Quit">×</button>
+                <button id="focus-badge" class="focus-badge hidden" title="Focus mode on — click to turn off" aria-label="Focus mode">🌙</button>
+
+                <div class="cat2-video-layer" aria-hidden="true">
+                  <canvas id="cat2-canvas-a" class="cat2-canvas cat2-video-visible"></canvas>
+                  <canvas id="cat2-canvas-b" class="cat2-canvas"></canvas>
+                  <video id="cat2-video-a" class="cat2-video-source" preload="auto"></video>
+                  <video id="cat2-video-b" class="cat2-video-source" preload="auto"></video>
+                </div>
+
+                <div id="pet-zone-head" class="pet-zone pet-zone-head" title="Pet my head — purrs!"></div>
+
+                <svg id="cat-svg-loaf" class="cat-svg cat-loaf-view" viewBox="0 0 120 128" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
+
+                <div class="nom-float hidden" aria-hidden="true">nom~</div>
+              </div>
+
+              <div id="food-bowl" class="food-bowl" title="Drag bowl to my mouth to feed me">
+                <div class="bowl-rim"></div>
+                <div class="bowl-body"></div>
+                <div class="bowl-food"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="context-menu" class="context-menu hidden">
+        <button data-action="hide">Hide Meow</button>
+        <button data-action="quit">Quit</button>
+      </div>
+    </div>
+
+    <script src="personality.js"></script>
+    <script src="settings.js"></script>
+    <script src="chat.js"></script>
+    <script src="cat2/cat2-clips.js"></script>
+    <script src="cat2/cat2-player.js"></script>
+    <script src="cat2/cat2.js"></script>
+  </body>
+</html>

@@ -3,7 +3,7 @@
  *
  * Routing:
  *   1. Fast path  — offline intent match runs an allowlisted action instantly.
- *   2. Smart path — if an OpenAI key is set, use tool-calling for natural
+ *   2. Smart path — if a Gemini key is set, use function calling for natural
  *                   language ("something to write in", "open whatever I browse
  *                   the web with"), executing the same allowlisted actions.
  *   3. Fallback   — no task detected: return null so the renderer's personality
@@ -14,8 +14,7 @@
 const actions = require('./actions');
 const intents = require('./intents');
 const config = require('./agent-config');
-
-const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
+const gemini = require('./gemini');
 
 const CUTE_CONFIRMATIONS = [
   '*paws at the keyboard* Done!',
@@ -34,7 +33,6 @@ async function tryFastPath(message) {
   const intent = intents.matchIntent(message);
   if (!intent) return null;
 
-  // Help / "what can you do" — no OS action, just a friendly rundown.
   if (intent.type === 'help') {
     return { text: actions.listCommands().message, expression: 'happy', actionTaken: false, actionId: null };
   }
@@ -70,7 +68,7 @@ async function tryFastPath(message) {
   };
 }
 
-// ── OpenAI tool-calling path ─────────────────────────────────────────
+// ── Gemini function-calling path ───────────────────────────────────
 const SYSTEM_PROMPT = `You are Meow, a cute, warm desktop cat companion. You speak briefly and adorably, with occasional cat noises (mrow, purr) and the odd emoji.
 
 You can help with small computer tasks using your tools:
@@ -86,101 +84,110 @@ Rules:
 - Only chat (no tool) for greetings, feelings, and small talk.
 - After a tool runs, reply in ONE short cute sentence confirming what you did. Never mention JSON, tools, or functions.`;
 
-function buildTools() {
+function buildFunctionDeclarations() {
   return [
     {
-      type: 'function',
-      function: {
-        name: 'open_app',
-        description: 'Open an allowlisted application on the user\'s computer.',
-        parameters: {
-          type: 'object',
-          properties: {
-            app: { type: 'string', enum: actions.listAppIds(), description: 'Which app to open.' },
-          },
-          required: ['app'],
+      name: 'open_app',
+      description: 'Open an allowlisted application on the user\'s computer.',
+      parameters: {
+        type: 'object',
+        properties: {
+          app: { type: 'string', enum: actions.listAppIds(), description: 'Which app to open.' },
         },
+        required: ['app'],
       },
     },
     {
-      type: 'function',
-      function: {
-        name: 'close_app',
-        description: 'Close/quit an allowlisted application on the user\'s computer.',
-        parameters: {
-          type: 'object',
-          properties: {
-            app: { type: 'string', enum: actions.listAppIds(), description: 'Which app to close.' },
-          },
-          required: ['app'],
+      name: 'close_app',
+      description: 'Close/quit an allowlisted application on the user\'s computer.',
+      parameters: {
+        type: 'object',
+        properties: {
+          app: { type: 'string', enum: actions.listAppIds(), description: 'Which app to close.' },
         },
+        required: ['app'],
       },
     },
     {
-      type: 'function',
-      function: {
-        name: 'open_url',
-        description: 'Open a web link (http/https) in the default browser.',
-        parameters: {
-          type: 'object',
-          properties: { url: { type: 'string', description: 'A full http(s) URL.' } },
-          required: ['url'],
-        },
+      name: 'open_url',
+      description: 'Open a web link (http/https) in the default browser.',
+      parameters: {
+        type: 'object',
+        properties: { url: { type: 'string', description: 'A full http(s) URL.' } },
+        required: ['url'],
       },
     },
     {
-      type: 'function',
-      function: {
-        name: 'get_time',
-        description: 'Get the current local time and date.',
-        parameters: { type: 'object', properties: {} },
-      },
+      name: 'get_time',
+      description: 'Get the current local time and date.',
+      parameters: { type: 'object', properties: {} },
     },
     {
-      type: 'function',
-      function: {
-        name: 'list_commands',
-        description: 'List everything Meow can do. Use when the user asks what you can do or what commands you know.',
-        parameters: { type: 'object', properties: {} },
-      },
+      name: 'list_commands',
+      description: 'List everything Meow can do. Use when the user asks what you can do or what commands you know.',
+      parameters: { type: 'object', properties: {} },
     },
   ];
 }
 
-async function callOpenAI(messages, apiKey, model) {
-  const res = await fetch(OPENAI_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      tools: buildTools(),
-      tool_choice: 'auto',
-      temperature: 0.7,
-      max_tokens: 200,
-    }),
-  });
+function buildGeminiContents(history, message) {
+  const contents = [];
 
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    const err = new Error(`OpenAI ${res.status}`);
-    err.status = res.status;
-    err.detail = detail;
-    throw err;
+  (history || []).slice(-6).forEach((m) => {
+    if (!m?.text) return;
+    contents.push({
+      role: m.role === 'user' ? 'user' : 'model',
+      parts: [{ text: m.text }],
+    });
+  });
+  contents.push({ role: 'user', parts: [{ text: message }] });
+
+  return contents;
+}
+
+function extractParts(response) {
+  return response?.candidates?.[0]?.content?.parts || [];
+}
+
+function extractText(parts) {
+  return parts
+    .map((part) => part.text)
+    .filter(Boolean)
+    .join('')
+    .trim();
+}
+
+function extractFunctionCalls(parts) {
+  return parts
+    .filter((part) => part.functionCall)
+    .map((part) => part.functionCall);
+}
+
+async function callGemini(contents, apiKey, model, { includeTools = true } = {}) {
+  const body = {
+    systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+    contents,
+    generationConfig: {
+      temperature: 0.7,
+      maxOutputTokens: 200,
+    },
+  };
+
+  if (includeTools) {
+    body.tools = [{ functionDeclarations: buildFunctionDeclarations() }];
   }
-  return res.json();
+
+  const { json, model: usedModel } = await gemini.generateContent(apiKey, model, body, { includeTools });
+  if (usedModel && usedModel !== model) {
+    config.save({ model: usedModel });
+  }
+  return json;
 }
 
 async function executeToolCall(call) {
-  let args = {};
-  try {
-    args = JSON.parse(call.function.arguments || '{}');
-  } catch (_) { /* leave empty */ }
+  const args = call.args || {};
 
-  const name = call.function.name;
+  const name = call.name;
   if (name === 'open_app') return actions.openApp(args.app);
   if (name === 'close_app') return actions.closeApp(args.app);
   if (name === 'open_url') return actions.openUrl(args.url);
@@ -190,49 +197,51 @@ async function executeToolCall(call) {
 }
 
 async function trySmartPath(message, history, cfg) {
-  const messages = [{ role: 'system', content: SYSTEM_PROMPT }];
+  const contents = buildGeminiContents(history, message);
 
-  (history || []).slice(-6).forEach((m) => {
-    if (m && m.text) {
-      messages.push({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text });
-    }
-  });
-  messages.push({ role: 'user', content: message });
+  const first = await callGemini(contents, cfg.apiKey, cfg.model);
+  const firstParts = extractParts(first);
+  if (firstParts.length === 0) {
+    return { text: '*confused meow* My brain hiccuped! Try again? 🐾', expression: 'sad', actionTaken: false };
+  }
 
-  const first = await callOpenAI(messages, cfg.apiKey, cfg.model);
-  const choice = first.choices?.[0]?.message;
-  if (!choice) return { text: '*confused meow* My brain hiccuped! Try again? 🐾', expression: 'sad', actionTaken: false };
-
-  const toolCalls = choice.tool_calls || [];
-  if (toolCalls.length === 0) {
+  const functionCalls = extractFunctionCalls(firstParts);
+  if (functionCalls.length === 0) {
     return {
-      text: choice.content?.trim() || 'Mrow~',
+      text: extractText(firstParts) || 'Mrow~',
       expression: 'happy',
       actionTaken: false,
       actionId: null,
     };
   }
 
-  // Execute tools, then ask the model for a final Meow-voiced reply.
-  messages.push(choice);
+  const followUpContents = [...contents];
+  followUpContents.push({ role: 'model', parts: firstParts });
+
   let anyAction = false;
   let lastActionId = null;
   const NON_ACTION_TOOLS = ['get_time', 'list_commands'];
-  for (const call of toolCalls) {
+  const responseParts = [];
+
+  for (const call of functionCalls) {
     const result = await executeToolCall(call);
-    if (result.ok && !NON_ACTION_TOOLS.includes(call.function.name)) anyAction = true;
-    if (call.function.name === 'open_app' || call.function.name === 'close_app') {
-      try { lastActionId = JSON.parse(call.function.arguments || '{}').app || null; } catch (_) { /* ignore */ }
+    if (result.ok && !NON_ACTION_TOOLS.includes(call.name)) anyAction = true;
+    if (call.name === 'open_app' || call.name === 'close_app') {
+      lastActionId = call.args?.app || null;
     }
-    messages.push({
-      role: 'tool',
-      tool_call_id: call.id,
-      content: JSON.stringify(result),
+    responseParts.push({
+      functionResponse: {
+        name: call.name,
+        response: result,
+        id: call.id,
+      },
     });
   }
 
-  const second = await callOpenAI(messages, cfg.apiKey, cfg.model);
-  const finalText = second.choices?.[0]?.message?.content?.trim();
+  followUpContents.push({ role: 'user', parts: responseParts });
+
+  const second = await callGemini(followUpContents, cfg.apiKey, cfg.model);
+  const finalText = extractText(extractParts(second));
 
   return {
     text: finalText || pick(CUTE_CONFIRMATIONS),
@@ -242,10 +251,6 @@ async function trySmartPath(message, history, cfg) {
   };
 }
 
-/**
- * Handle a chat message. Returns an agent response, or null if the message is
- * not a task (so the renderer falls back to the personality engine).
- */
 async function handleChat({ message, history }) {
   const cfg = config.load();
   if (!cfg.agentEnabled) return null;
@@ -258,11 +263,24 @@ async function handleChat({ message, history }) {
   try {
     return await trySmartPath(message, history, cfg);
   } catch (err) {
-    if (err.status === 401) {
-      return { text: 'My key seems wrong~ check it in Settings? 🔑', expression: 'sad', actionTaken: false };
-    }
-    return { text: "*confused meow* I couldn't reach my brain just now. Try again?", expression: 'sad', actionTaken: false };
+    console.error('[Meow agent] Gemini error:', err.status, err.message);
+    return {
+      text: gemini.userMessageForError(err),
+      expression: 'sad',
+      actionTaken: false,
+    };
   }
 }
 
-module.exports = { handleChat };
+async function runHealthCheck() {
+  const cfg = config.load();
+  if (!cfg.apiKey) return gemini.getLastHealth();
+
+  const health = await gemini.testHealth(cfg.apiKey, cfg.model);
+  if (health.ok && health.model && health.model !== cfg.model) {
+    config.save({ model: health.model });
+  }
+  return health;
+}
+
+module.exports = { handleChat, runHealthCheck };

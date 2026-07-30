@@ -168,13 +168,16 @@
       <p class="settings-hint">Ask me to open apps like "open notepad" or "open the camera"</p>
 
       <div class="settings-row settings-col">
-        <span class="settings-label">OpenAI API key <span class="settings-optional">(optional)</span></span>
+        <span class="settings-label">Gemini API key <span class="settings-optional">(optional)</span></span>
         <div class="agent-key-row">
-          <input type="password" id="setting-agent-key" class="agent-key-input" placeholder="sk-..." autocomplete="off" spellcheck="false" />
+          <input type="password" id="setting-agent-key" class="agent-key-input" placeholder="AIza..." autocomplete="off" spellcheck="false" />
           <button type="button" id="setting-agent-save" class="agent-key-save">Save</button>
         </div>
       </div>
-      <p class="settings-hint">Common commands work offline for free. Add a key for natural requests like "pull up something to write in".</p>
+      <p class="settings-hint">Common commands work offline for free. Add a Gemini key for natural chat and requests like "pull up something to write in".</p>
+      <div class="settings-row">
+        <button type="button" id="agent-test-btn" class="agent-key-save">Test Gemini</button>
+      </div>
       <p id="agent-status" class="agent-status"></p>
     `;
 
@@ -215,22 +218,43 @@
       e.stopPropagation();
       const value = keyInput?.value.trim();
       if (!value) return;
-      setAgentConfig({ apiKey: value });
+      setAgentConfig({ apiKey: value }, true);
       keyInput.value = '';
+    });
+
+    panel.querySelector('#agent-test-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      testGeminiConnection();
     });
 
     refreshAgentStatus();
   }
 
-  function setAgentConfig(partial) {
-    window.meowAPI?.setAgentConfig?.(partial).then(applyAgentStatus).catch(() => {});
+  function setAgentConfig(partial, retest = false) {
+    window.meowAPI?.setAgentConfig?.(partial).then(() => {
+      if (retest) return testGeminiConnection();
+      return window.meowAPI?.getAgentConfig?.();
+    }).then(applyAgentStatus).catch(() => {});
+  }
+
+  async function testGeminiConnection() {
+    const status = document.querySelector('#agent-status');
+    if (status) status.textContent = 'Testing Gemini… looping models…';
+
+    try {
+      const health = await window.meowAPI?.testGemini?.();
+      const cfg = await window.meowAPI?.getAgentConfig?.();
+      applyAgentStatus(cfg, health);
+    } catch (_) {
+      if (status) status.textContent = 'Test failed — try again.';
+    }
   }
 
   function refreshAgentStatus() {
     window.meowAPI?.getAgentConfig?.().then(applyAgentStatus).catch(() => {});
   }
 
-  function applyAgentStatus(cfg) {
+  function applyAgentStatus(cfg, healthOverride) {
     if (!cfg) return;
     const panel = document.getElementById('settings-panel');
     if (!panel) return;
@@ -238,14 +262,25 @@
     const toggle = panel.querySelector('#setting-agent');
     if (toggle) toggle.checked = !!cfg.agentEnabled;
 
+    const health = healthOverride || cfg.geminiHealth;
     const status = panel.querySelector('#agent-status');
     if (status) {
       if (!cfg.agentEnabled) {
         status.textContent = 'Tasks off — I\'ll just chat.';
-      } else if (cfg.hasApiKey) {
-        status.textContent = 'Ready — offline commands + natural language. ✨';
-      } else {
+      } else if (!cfg.hasApiKey) {
         status.textContent = 'Offline mode — common commands work now.';
+      } else if (health?.ok) {
+        status.textContent = `Gemini connected (${health.model || cfg.model}). ✨`;
+      } else if (health?.reason === 'quota') {
+        status.textContent = 'Key saved, but free quota is used up — wait and tap Test Gemini again. ⏳';
+      } else if (health?.reason === 'auth') {
+        status.textContent = 'Gemini key rejected — paste a new one from aistudio.google.com. 🔑';
+      } else if (health?.reason === 'network') {
+        status.textContent = 'Couldn\'t reach Gemini — check your internet. 🌐';
+      } else if (health?.message) {
+        status.textContent = `Gemini issue: ${health.message.slice(0, 80)}`;
+      } else {
+        status.textContent = 'Key saved — tap Test Gemini to check connection.';
       }
     }
   }
