@@ -4,11 +4,16 @@
 (() => {
   const STORAGE_KEY = 'meowSettings';
 
+  const isCat2 = () => !!document.getElementById('cat2-canvas-a') ||
+    document.getElementById('cat')?.classList.contains('cat2-mode');
+
   const DEFAULTS = {
     focusMode: false,
     chattyLevel: 'normal', // quiet | normal | chatty
     reducedMotion: false,
     snoozeDuration: 30, // minutes: 10 | 30 | 60
+    feedIntervalMinutes: 5, // Cat 2: 5 | 10 | 15 | 30
+    catSounds: true, // Cat 2: meow clip audio
   };
 
   let current = { ...DEFAULTS };
@@ -25,6 +30,12 @@
       if (typeof saved.reducedMotion === 'boolean') current.reducedMotion = saved.reducedMotion;
       if ([10, 30, 60].includes(saved.snoozeDuration)) {
         current.snoozeDuration = saved.snoozeDuration;
+      }
+      if ([5, 10, 15, 30].includes(saved.feedIntervalMinutes)) {
+        current.feedIntervalMinutes = saved.feedIntervalMinutes;
+      }
+      if (typeof saved.catSounds === 'boolean') {
+        current.catSounds = saved.catSounds;
       }
     } catch (_) { /* ignore */ }
   }
@@ -96,6 +107,21 @@
     syncUI();
   }
 
+  function setFeedIntervalMinutes(mins) {
+    if (![5, 10, 15, 30].includes(mins)) return;
+    current.feedIntervalMinutes = mins;
+    save();
+    notifyChange('feedIntervalMinutes');
+    syncUI();
+  }
+
+  function setCatSounds(value) {
+    current.catSounds = !!value;
+    save();
+    notifyChange('catSounds');
+    syncUI();
+  }
+
   function syncUI() {
     const panel = document.getElementById('settings-panel');
     if (!panel) return;
@@ -106,6 +132,9 @@
     const motionToggle = panel.querySelector('#setting-motion');
     if (motionToggle) motionToggle.checked = current.reducedMotion;
 
+    const soundsToggle = panel.querySelector('#setting-sounds');
+    if (soundsToggle) soundsToggle.checked = current.catSounds;
+
     panel.querySelectorAll('.chatty-btn').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.level === current.chattyLevel);
     });
@@ -113,13 +142,145 @@
     panel.querySelectorAll('.snooze-pref-btn').forEach((btn) => {
       btn.classList.toggle('active', Number(btn.dataset.mins) === current.snoozeDuration);
     });
+
+    panel.querySelectorAll('.feed-interval-btn').forEach((btn) => {
+      btn.classList.toggle('active', Number(btn.dataset.mins) === current.feedIntervalMinutes);
+    });
+  }
+
+  function bindCommonSettings(panel) {
+    panel.querySelector('#setting-focus')?.addEventListener('change', (e) => {
+      e.stopPropagation();
+      setFocusMode(e.target.checked);
+    });
+
+    panel.querySelector('#setting-motion')?.addEventListener('change', (e) => {
+      e.stopPropagation();
+      setReducedMotion(e.target.checked);
+    });
+
+    panel.querySelector('#setting-sounds')?.addEventListener('change', (e) => {
+      e.stopPropagation();
+      setCatSounds(e.target.checked);
+    });
+
+    panel.querySelectorAll('.chatty-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setChattyLevel(btn.dataset.level);
+      });
+    });
+
+    panel.querySelectorAll('.snooze-pref-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setSnoozeDuration(Number(btn.dataset.mins));
+      });
+    });
+
+    panel.querySelectorAll('.feed-interval-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setFeedIntervalMinutes(Number(btn.dataset.mins));
+      });
+    });
+  }
+
+  function bindAgentSettings(panel) {
+    const agentToggle = panel.querySelector('#setting-agent');
+    agentToggle?.addEventListener('change', (e) => {
+      e.stopPropagation();
+      setAgentConfig({ agentEnabled: e.target.checked });
+    });
+
+    const keyInput = panel.querySelector('#setting-agent-key');
+    keyInput?.addEventListener('keydown', (e) => e.stopPropagation());
+
+    panel.querySelector('#setting-agent-save')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const value = keyInput?.value.trim();
+      if (!value) return;
+      setAgentConfig({ apiKey: value }, true);
+      keyInput.value = '';
+    });
+
+    panel.querySelector('#agent-test-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      testGeminiConnection();
+    });
   }
 
   function buildUI() {
     const panel = document.getElementById('settings-panel');
     if (!panel) return;
 
-    panel.innerHTML = `
+    if (isCat2()) {
+      panel.innerHTML = `
+      <p class="settings-section-title">Cat behaviour</p>
+
+      <div class="settings-row">
+        <label class="settings-label" for="setting-focus">Focus mode</label>
+        <label class="toggle">
+          <input type="checkbox" id="setting-focus" ${current.focusMode ? 'checked' : ''} />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <p class="settings-hint">Pauses walks, butterfly chases, feed reminders, and idle antics</p>
+
+      <div class="settings-row settings-col">
+        <span class="settings-label">Activity level</span>
+        <div class="segmented">
+          <button type="button" class="chatty-btn${current.chattyLevel === 'quiet' ? ' active' : ''}" data-level="quiet">Quiet</button>
+          <button type="button" class="chatty-btn${current.chattyLevel === 'normal' ? ' active' : ''}" data-level="normal">Normal</button>
+          <button type="button" class="chatty-btn${current.chattyLevel === 'chatty' ? ' active' : ''}" data-level="chatty">Chatty</button>
+        </div>
+      </div>
+      <p class="settings-hint">How often I wander, nap, chase butterflies, or say something</p>
+
+      <div class="settings-row settings-col">
+        <span class="settings-label">Feed me reminder</span>
+        <div class="segmented">
+          <button type="button" class="feed-interval-btn${current.feedIntervalMinutes === 5 ? ' active' : ''}" data-mins="5">5m</button>
+          <button type="button" class="feed-interval-btn${current.feedIntervalMinutes === 10 ? ' active' : ''}" data-mins="10">10m</button>
+          <button type="button" class="feed-interval-btn${current.feedIntervalMinutes === 15 ? ' active' : ''}" data-mins="15">15m</button>
+          <button type="button" class="feed-interval-btn${current.feedIntervalMinutes === 30 ? ' active' : ''}" data-mins="30">30m</button>
+        </div>
+      </div>
+      <p class="settings-hint">How long between &ldquo;Please feed me&rdquo; prompts (after you tap Yes or No)</p>
+
+      <div class="settings-row">
+        <label class="settings-label" for="setting-sounds">Cat sounds</label>
+        <label class="toggle">
+          <input type="checkbox" id="setting-sounds" ${current.catSounds ? 'checked' : ''} />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <p class="settings-hint">Meow sounds during idle mewing animations</p>
+
+      <div class="settings-row">
+        <label class="settings-label" for="setting-motion">Reduced motion</label>
+        <label class="toggle">
+          <input type="checkbox" id="setting-motion" ${current.reducedMotion ? 'checked' : ''} />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <p class="settings-hint">Pauses video clips &mdash; I hold still instead of looping animations</p>
+
+      <div class="settings-row settings-col">
+        <span class="settings-label">Break snooze default</span>
+        <div class="segmented">
+          <button type="button" class="snooze-pref-btn${current.snoozeDuration === 10 ? ' active' : ''}" data-mins="10">10m</button>
+          <button type="button" class="snooze-pref-btn${current.snoozeDuration === 30 ? ' active' : ''}" data-mins="30">30m</button>
+          <button type="button" class="snooze-pref-btn${current.snoozeDuration === 60 ? ' active' : ''}" data-mins="60">60m</button>
+        </div>
+      </div>
+      <p class="settings-hint">Default snooze after the 2-hour work break speech bubble</p>
+
+      <div class="settings-divider"></div>
+      <p class="settings-section-title">Chat &amp; tasks</p>
+      `;
+    } else {
+      panel.innerHTML = `
       <div class="settings-row">
         <label class="settings-label" for="setting-focus">Focus mode</label>
         <label class="toggle">
@@ -157,6 +318,10 @@
       </div>
 
       <div class="settings-divider"></div>
+      `;
+    }
+
+    panel.innerHTML += `
 
       <div class="settings-row">
         <label class="settings-label" for="setting-agent">Let Meow do tasks</label>
@@ -181,52 +346,8 @@
       <p id="agent-status" class="agent-status"></p>
     `;
 
-    panel.querySelector('#setting-focus')?.addEventListener('change', (e) => {
-      e.stopPropagation();
-      setFocusMode(e.target.checked);
-    });
-
-    panel.querySelector('#setting-motion')?.addEventListener('change', (e) => {
-      e.stopPropagation();
-      setReducedMotion(e.target.checked);
-    });
-
-    panel.querySelectorAll('.chatty-btn').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        setChattyLevel(btn.dataset.level);
-      });
-    });
-
-    panel.querySelectorAll('.snooze-pref-btn').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        setSnoozeDuration(Number(btn.dataset.mins));
-      });
-    });
-
-    const agentToggle = panel.querySelector('#setting-agent');
-    agentToggle?.addEventListener('change', (e) => {
-      e.stopPropagation();
-      setAgentConfig({ agentEnabled: e.target.checked });
-    });
-
-    const keyInput = panel.querySelector('#setting-agent-key');
-    keyInput?.addEventListener('keydown', (e) => e.stopPropagation());
-
-    panel.querySelector('#setting-agent-save')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const value = keyInput?.value.trim();
-      if (!value) return;
-      setAgentConfig({ apiKey: value }, true);
-      keyInput.value = '';
-    });
-
-    panel.querySelector('#agent-test-btn')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      testGeminiConnection();
-    });
-
+    bindCommonSettings(panel);
+    bindAgentSettings(panel);
     refreshAgentStatus();
   }
 
@@ -299,6 +420,8 @@
     setChattyLevel,
     setReducedMotion,
     setSnoozeDuration,
+    setFeedIntervalMinutes,
+    setCatSounds,
   };
 
   if (document.readyState === 'loading') {

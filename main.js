@@ -25,9 +25,30 @@ function moveCatWindow(deltaX, deltaY) {
   if (dx === 0 && dy === 0) return;
 
   const [x, y] = catWindow.getPosition();
-  const nextX = toSafeInt(x, 0) + dx;
-  const nextY = toSafeInt(y, 0) + dy;
+  const [width, height] = catWindow.getSize();
+  const display = screen.getDisplayMatching(catWindow.getBounds());
+  const area = display.workArea;
+  const nextX = Math.min(Math.max(area.x, toSafeInt(x, 0) + dx), area.x + area.width - width);
+  const nextY = Math.min(Math.max(area.y, toSafeInt(y, 0) + dy), area.y + area.height - height);
   catWindow.setPosition(nextX, nextY);
+}
+
+function getCatWindowPlacement() {
+  if (!catWindow) return null;
+  const [x, y] = catWindow.getPosition();
+  const [width, height] = catWindow.getSize();
+  const display = screen.getDisplayMatching(catWindow.getBounds());
+  const area = display.workArea;
+  const edgeMargin = 28;
+  return {
+    x,
+    y,
+    width,
+    height,
+    workArea: { x: area.x, y: area.y, width: area.width, height: area.height },
+    nearLeft: x <= area.x + edgeMargin,
+    nearRight: x + width >= area.x + area.width - edgeMargin,
+  };
 }
 
 // ── Continuous work tracker (global mouse/keyboard via system idle time) ──
@@ -185,12 +206,14 @@ function createTrayIcon() {
 
 function createCatWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+  const winHeight = IS_CAT2 ? 460 : 240;
+  const bottomMargin = 20;
 
   catWindow = new BrowserWindow({
     width: 220,
-    height: IS_CAT2 ? 218 : 240,
+    height: winHeight,
     x: width - 240,
-    y: height - 260,
+    y: height - winHeight - bottomMargin,
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
@@ -273,6 +296,8 @@ ipcMain.on('window-drag', (_event, payload = {}) => {
   moveCatWindow(payload.deltaX, payload.deltaY);
 });
 
+ipcMain.handle('window:get-placement', () => getCatWindowPlacement());
+
 ipcMain.on('window-minimize', () => {
   if (catWindow) catWindow.hide();
 });
@@ -290,9 +315,11 @@ ipcMain.on('window-resize', (_event, payload = {}) => {
   const [, currentHeight] = catWindow.getSize();
 
   if (anchorBottom) {
+    const bounds = catWindow.getBounds();
+    const bottom = bounds.y + bounds.height;
     catWindow.setBounds({
-      x: toSafeInt(x, 0),
-      y: toSafeInt(y, 0) + toSafeInt(currentHeight, height) - height,
+      x: bounds.x,
+      y: bottom - height,
       width,
       height,
     });

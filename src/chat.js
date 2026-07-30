@@ -23,19 +23,25 @@
   const CHAT_HISTORY_KEY = 'meowChatHistory';
   const MAX_HISTORY = 20;
 
-  const isCat2 = () => document.getElementById('cat')?.classList.contains('cat2-mode');
+  const isCat2 = () => !!document.getElementById('cat2-canvas-a') ||
+    document.getElementById('cat')?.classList.contains('cat2-mode');
+  const CAT2_WINDOW_H = 460;
   const COMPACT_SIZE = {
     width: 220,
-    height: isCat2() ? 218 : 240,
+    height: isCat2() ? CAT2_WINDOW_H : 240,
   };
-  const CHAT_SIZE = { width: 220, height: isCat2() ? 460 : 442 };
+  const CHAT_SIZE = { width: 220, height: isCat2() ? CAT2_WINDOW_H : 442 };
   const LOOK_SIZE = { width: 220, height: 344 };
-  const SETTINGS_SIZE = { width: 220, height: isCat2() ? 600 : 520 };
+  const SETTINGS_SIZE = { width: 220, height: isCat2() ? CAT2_WINDOW_H : 520 };
 
   function resizeWindow(size, anchorBottom = false) {
-    if (window.meowAPI?.resizeWindow) {
-      window.meowAPI.resizeWindow(size.width, size.height, anchorBottom);
+    if (!window.meowAPI?.resizeWindow) return;
+    if (isCat2()) {
+      // Cat 2 keeps a fixed window height so opening chat never shifts the cat.
+      window.meowAPI.resizeWindow(size.width, CAT2_WINDOW_H, false);
+      return;
     }
+    window.meowAPI.resizeWindow(size.width, size.height, anchorBottom);
   }
 
   function loadChatHistory() {
@@ -99,18 +105,23 @@
     isOpen = true;
     chatPanel.classList.remove('hidden');
     window.MeowCat.hideSpeech();
-    if (window.MeowCat.wakeUp) window.MeowCat.wakeUp();
-    if (window.MeowCat.stopEating) window.MeowCat.stopEating();
-    if (window.MeowCat.stopWalk) window.MeowCat.stopWalk();
-    if (window.MeowCat.stopActivity) window.MeowCat.stopActivity();
-    if (window.MeowCat.hideFoodChoice) window.MeowCat.hideFoodChoice();
+    const petting = window.MeowCat.isPetting?.();
+    const feedPending = window.MeowCat.isAwaitingFoodChoice?.() ||
+      document.getElementById('cat')?.dataset.begging === 'true';
+    if (!petting) {
+      if (window.MeowCat.wakeUp) window.MeowCat.wakeUp();
+      if (window.MeowCat.stopEating) window.MeowCat.stopEating();
+      if (window.MeowCat.stopWalk) window.MeowCat.stopWalk();
+      if (!feedPending && window.MeowCat.stopActivity) window.MeowCat.stopActivity();
+    }
+    if (!feedPending && window.MeowCat.hideFoodChoice) window.MeowCat.hideFoodChoice();
     switchTab('chat');
 
     if (!greeted) {
       greeted = true;
       restoreSessionMessages();
       addMessage('meow', "Hi friend! 🐱 How's your day going? I'm all ears!", false);
-      window.MeowCat.setExpression('happy');
+      if (!petting) window.MeowCat.setExpression('happy');
     }
   }
 

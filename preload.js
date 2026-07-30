@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('meowAPI', {
+  getWindowPlacement: () => ipcRenderer.invoke('window:get-placement'),
   dragWindow: (deltaX, deltaY) => {
     const dx = Math.round(Number(deltaX) || 0);
     const dy = Math.round(Number(deltaY) || 0);

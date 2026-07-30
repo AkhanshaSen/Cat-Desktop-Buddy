@@ -14,6 +14,7 @@ const Cat2Player = (() => {
   let pendingSwitch = null;
   let stateCatEl = null;
   let reducedMotion = false;
+  let soundsEnabled = true;
   let rafId = null;
 
   const LOOP_END_WINDOW = 0.18;
@@ -23,6 +24,60 @@ const Cat2Player = (() => {
   let transitionTimer = null;
   let crossfadeTimer = null;
   let lastLoopTime = 0;
+  let clipEndedDispatched = null;
+  let lastPlaybackTime = -1;
+  let playbackStalledAt = 0;
+  let transitionWatchStarted = 0;
+  let crossfadeWatchStarted = 0;
+
+  const ONE_SHOT_END_EPS = 0.12;
+  const PLAYBACK_STALL_MS = 1800;
+  const TRANSITION_STUCK_MS = 2800;
+  const CROSSFADE_STUCK_MS = 2200;
+
+  /** Fixed output stage (displayed at 175×115 via CSS). */
+  const OUTPUT_W = 350;
+  const OUTPUT_H = 230;
+  const CAT_HEIGHT_RATIO = 0.86;
+  const CAT_BOTTOM_PAD_RATIO = 0.05;
+  const CAT_MAX_WIDTH_RATIO = 0.94;
+  const BOUNDS_ALPHA = 28;
+  const BOUNDS_STEP = 3;
+  /** HD exports (1280×720 etc.) — scale to cat silhouette, not full frame. */
+  const HD_BOUNDS_MIN_W = OUTPUT_W * 1.2;
+  const HD_BOUNDS_MIN_H = OUTPUT_H * 1.2;
+
+  let keyCanvas = null;
+  let keyCtx = null;
+  /** Per-clip draw rect locked on first frame (avoids within-clip jitter). */
+  const clipPlacement = {};
+
+  function needsBoundsFit(vw, vh) {
+    return vw > HD_BOUNDS_MIN_W || vh > HD_BOUNDS_MIN_H;
+  }
+
+  function computePlacement(bounds, clipMeta) {
+    const fitYOffset = clipMeta?.fitYOffset ?? 0;
+    const destFootX = OUTPUT_W / 2;
+    const destFootY = OUTPUT_H - (OUTPUT_H * CAT_BOTTOM_PAD_RATIO) + fitYOffset;
+    const maxW = OUTPUT_W * CAT_MAX_WIDTH_RATIO;
+    const targetH = OUTPUT_H * CAT_HEIGHT_RATIO;
+    const scale = Math.min(targetH / bounds.h, maxW / bounds.w);
+    const srcFootX = bounds.x + bounds.w / 2;
+    const srcFootY = bounds.y + bounds.h;
+    return {
+      scale,
+      drawX: destFootX - srcFootX * scale,
+      drawY: destFootY - srcFootY * scale,
+    };
+  }
+
+  function getPlacement(clipKey, bounds, clipMeta) {
+    if (clipPlacement[clipKey]) return clipPlacement[clipKey];
+    const placement = computePlacement(bounds, clipMeta);
+    clipPlacement[clipKey] = placement;
+    return placement;
+  }
 
   function other(which) {
     return which === 'a' ? 'b' : 'a';
@@ -181,36 +236,199 @@ const Cat2Player = (() => {
     }
   }
 
-  function renderFrame(video, canvas, ctx, bgMode) {
+  function ensureKeyCanvas(w, h) {
+    if (!keyCanvas) {
+      keyCanvas = document.createElement('canvas');
+      keyCtx = keyCanvas.getContext('2d', { willReadFrequently: true });
+    }
+    if (keyCanvas.width !== w || keyCanvas.height !== h) {
+      keyCanvas.width = w;
+      keyCanvas.height = h;
+    }
+    return keyCtx;
+  }
+
+  function findOpaqueBounds(data, width, height) {
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+    const step = BOUNDS_STEP;
+
+    for (let y = 0; y < height; y += step) {
+      for (let x = 0; x < width; x += step) {
+        const alpha = data[(y * width + x) * 4 + 3];
+        if (alpha <= BOUNDS_ALPHA) continue;
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+
+    if (maxX < minX || maxY < minY) return null;
+
+    minX = Math.max(0, minX - step);
+    minY = Math.max(0, minY - step);
+    maxX = Math.min(width - 1, maxX + step);
+    maxY = Math.min(height - 1, maxY + step);
+
+    return {
+      x: minX,
+      y: minY,
+      w: maxX - minX + 1,
+      h: maxY - minY + 1,
+    };
+  }
+
+  function renderFrame(video, canvas, ctx, clipMeta) {
     if (!video || !canvas || !ctx || video.readyState < 2) return;
     const vw = video.videoWidth;
     const vh = video.videoHeight;
     if (!vw || !vh) return;
 
-    if (canvas.width !== vw || canvas.height !== vh) {
-      canvas.width = vw;
-      canvas.height = vh;
-    }
+    const keyCtxLocal = ensureKeyCanvas(vw, vh);
+    keyCtxLocal.clearRect(0, 0, vw, vh);
+    keyCtxLocal.drawImage(video, 0, 0, vw, vh);
 
-    ctx.clearRect(0, 0, vw, vh);
-    ctx.drawImage(video, 0, 0, vw, vh);
-
-    const frame = ctx.getImageData(0, 0, vw, vh);
+    const frame = keyCtxLocal.getImageData(0, 0, vw, vh);
+    const bgMode = clipMeta?.bgMode;
     if (bgMode === 'black') {
       keyBlackBackground(frame.data, vw, vh);
     } else {
       keyCheckerboardBackground(frame.data, vw, vh);
     }
-    ctx.putImageData(frame, 0, 0);
+    keyCtxLocal.putImageData(frame, 0, 0);
+
+    if (canvas.width !== OUTPUT_W || canvas.height !== OUTPUT_H) {
+      canvas.width = OUTPUT_W;
+      canvas.height = OUTPUT_H;
+    }
+    ctx.clearRect(0, 0, OUTPUT_W, OUTPUT_H);
+
+    if (needsBoundsFit(vw, vh)) {
+      const bounds = findOpaqueBounds(frame.data, vw, vh);
+      if (bounds) {
+        const clipKey = video.dataset.clipKey || currentKey || 'idle';
+        const placement = getPlacement(clipKey, bounds, clipMeta);
+        ctx.drawImage(
+          keyCanvas, 0, 0, vw, vh,
+          placement.drawX, placement.drawY, vw * placement.scale, vh * placement.scale
+        );
+        return;
+      }
+    }
+
+    const scale = Math.min(OUTPUT_W / vw, OUTPUT_H / vh);
+    const dw = vw * scale;
+    const dh = vh * scale;
+    const dx = (OUTPUT_W - dw) / 2;
+    const dy = (OUTPUT_H - dh) / 2;
+    ctx.drawImage(keyCanvas, 0, 0, vw, vh, dx, dy, dw, dh);
   }
 
   function renderVisible() {
+    const aVis = canvasA?.classList.contains('cat2-video-visible');
+    const bVis = canvasB?.classList.contains('cat2-video-visible');
+    const crossfading = !!(crossfadeTimer ||
+      canvasA?.classList.contains('cat2-crossfade-top') ||
+      canvasB?.classList.contains('cat2-crossfade-top'));
+    if (aVis && bVis && !crossfading) settleSingleCanvas();
+
     if (canvasA?.classList.contains('cat2-video-visible')) {
-      renderFrame(videoA, canvasA, ctxA, Cat2Clips.get(videoA.dataset.clipKey)?.bgMode);
+      renderFrame(videoA, canvasA, ctxA, Cat2Clips.get(videoA.dataset.clipKey));
     }
     if (canvasB?.classList.contains('cat2-video-visible')) {
-      renderFrame(videoB, canvasB, ctxB, Cat2Clips.get(videoB.dataset.clipKey)?.bgMode);
+      renderFrame(videoB, canvasB, ctxB, Cat2Clips.get(videoB.dataset.clipKey));
     }
+  }
+
+  function dispatchClipEnded(key) {
+    if (clipEndedDispatched === key) return;
+    clipEndedDispatched = key;
+    muteAllVideos();
+    window.dispatchEvent(new CustomEvent('cat2:clip-ended', { detail: { key } }));
+  }
+
+  function checkOneShotEnded() {
+    const video = activeVideo();
+    if (!video || video.readyState < 2) return;
+    const clip = Cat2Clips.get(currentKey);
+    if (clip?.loop) return;
+    const dur = video.duration;
+    if (!dur || !Number.isFinite(dur)) return;
+    if (video.ended || video.currentTime >= dur - ONE_SHOT_END_EPS) {
+      dispatchClipEnded(currentKey);
+    }
+  }
+
+  function ensurePlayback() {
+    if (reducedMotion) return;
+    const video = activeVideo();
+    if (!video || video.readyState < 2) return;
+
+    ensureOneCanvasVisible();
+
+    const clip = Cat2Clips.get(currentKey);
+    const dur = video.duration;
+    const atEnd = !clip?.loop && dur && Number.isFinite(dur) &&
+      (video.ended || video.currentTime >= dur - ONE_SHOT_END_EPS);
+    if (atEnd) return;
+
+    if (video.paused) {
+      applyAudioForClip(video, currentKey);
+      video.play().catch(() => {});
+      return;
+    }
+
+    const t = video.currentTime;
+    const now = performance.now();
+    if (Math.abs(t - lastPlaybackTime) < 0.001) {
+      if (!playbackStalledAt) playbackStalledAt = now;
+      else if (now - playbackStalledAt >= PLAYBACK_STALL_MS) {
+        playbackStalledAt = now;
+        if (t > 0.05) video.currentTime = Math.max(0, t - 0.04);
+        video.play().catch(() => {});
+      }
+    } else {
+      lastPlaybackTime = t;
+      playbackStalledAt = 0;
+    }
+  }
+
+  function checkStuckTransition() {
+    const now = performance.now();
+    if (transitionTimer && transitionWatchStarted &&
+        now - transitionWatchStarted >= TRANSITION_STUCK_MS) {
+      clearTransitionTimer();
+      transitionWatchStarted = 0;
+      if (pendingSwitch) flushPendingSwitch();
+      else {
+        settleSingleCanvas();
+        ensurePlayback();
+      }
+    }
+    if (crossfadeTimer && crossfadeWatchStarted &&
+        now - crossfadeWatchStarted >= CROSSFADE_STUCK_MS) {
+      clearCrossfadeTimer();
+      crossfadeWatchStarted = 0;
+      settleSingleCanvas();
+      ensurePlayback();
+    }
+  }
+
+  function forceRecover() {
+    cancelPending();
+    clearCrossfadeTimer();
+    transitionWatchStarted = 0;
+    crossfadeWatchStarted = 0;
+    clipEndedDispatched = null;
+    lastPlaybackTime = -1;
+    playbackStalledAt = 0;
+    settleSingleCanvas();
+    ensureOneCanvasVisible();
+    ensurePlayback();
+    renderVisible();
   }
 
   function startRenderLoop() {
@@ -219,6 +437,9 @@ const Cat2Player = (() => {
       renderVisible();
       checkPendingSwitch();
       checkClipLoop();
+      checkOneShotEnded();
+      ensurePlayback();
+      checkStuckTransition();
       rafId = requestAnimationFrame(loop);
     };
     rafId = requestAnimationFrame(loop);
@@ -236,6 +457,8 @@ const Cat2Player = (() => {
       clearTimeout(crossfadeTimer);
       crossfadeTimer = null;
     }
+    crossfadeWatchStarted = 0;
+    settleSingleCanvas();
     ensureOneCanvasVisible();
   }
 
@@ -244,6 +467,7 @@ const Cat2Player = (() => {
       clearTimeout(transitionTimer);
       transitionTimer = null;
     }
+    transitionWatchStarted = 0;
   }
 
   function dispatchClipVisible(key) {
@@ -256,12 +480,14 @@ const Cat2Player = (() => {
 
   function scheduleTransition(key, opts = {}) {
     clearTransitionTimer();
+    transitionWatchStarted = performance.now();
     const crossfade = opts.crossfade !== false;
-    const pauseMs = opts.pauseMs ?? (crossfade ? 0 : TRANSITION_PAUSE_MS);
+    const pauseMs = opts.pauseMs ?? 0;
 
     const run = () => {
       transitionTimer = null;
-      switchClip(key, { crossfade, force: true });
+      transitionWatchStarted = 0;
+      switchClip(key, { crossfade, force: true, crossfadeMs: opts.crossfadeMs });
     };
 
     if (pauseMs <= 0) {
@@ -317,6 +543,7 @@ const Cat2Player = (() => {
     pendingSwitch = null;
     clearTransitionTimer();
     clearCrossfadeTimer();
+    settleSingleCanvas();
   }
 
   function getCurrentKey() {
@@ -330,23 +557,23 @@ const Cat2Player = (() => {
   /**
    * Queue a clip change at the next loop boundary, or crossfade immediately.
    */
-  function queueClip(key, { immediate = false, crossfade = true, force = false, pauseMs } = {}) {
-    if (!force && currentKey === key && !pendingSwitch && !transitionTimer) return;
+  function queueClip(key, { immediate = false, crossfade = true, force = false, pauseMs, crossfadeMs } = {}) {
+    if (currentKey === key && !pendingSwitch && !transitionTimer && !crossfadeTimer) return;
 
     if (immediate) {
       cancelPending();
-      scheduleTransition(key, { crossfade, pauseMs });
+      scheduleTransition(key, { crossfade, pauseMs, crossfadeMs });
       return;
     }
 
     const clip = Cat2Clips.get(currentKey);
     const video = activeVideo();
     if (!clip?.loop || !video?.duration || !Number.isFinite(video.duration)) {
-      scheduleTransition(key, { crossfade, pauseMs });
+      scheduleTransition(key, { crossfade, pauseMs, crossfadeMs });
       return;
     }
 
-    pendingSwitch = { key, opts: { crossfade, pauseMs } };
+    pendingSwitch = { key, opts: { crossfade, pauseMs, crossfadeMs } };
 
     if (video.currentTime >= video.duration - LOOP_END_WINDOW) {
       flushPendingSwitch();
@@ -374,6 +601,10 @@ const Cat2Player = (() => {
     canvasA.classList.add('cat2-video-visible');
     startRenderLoop();
     switchClip(Cat2Clips.forState(catEl?.dataset || {}), { crossfade: false });
+
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) forceRecover();
+    });
   }
 
   function onVideoEnded(e) {
@@ -383,19 +614,55 @@ const Cat2Player = (() => {
       clearTimeout(oneShotTimer);
       oneShotTimer = null;
     }
-    if (currentKey === 'eat' || currentKey === 'walk' || currentKey === 'butterfly' || currentKey === 'pet') {
-      window.dispatchEvent(new CustomEvent('cat2:clip-ended', { detail: { key: currentKey } }));
+    const key = currentKey;
+    const clip = Cat2Clips.get(key);
+    if (!clip?.loop) {
+      dispatchClipEnded(key);
       return;
     }
+    muteAllVideos();
     syncFromState();
+  }
+
+  function shouldPlayClipAudio(key) {
+    const clip = Cat2Clips.get(key);
+    return !!(clip?.hasAudio && soundsEnabled && !reducedMotion);
+  }
+
+  function applyAudioForClip(video, key) {
+    if (!video) return;
+    const audible = shouldPlayClipAudio(key);
+    video.muted = !audible;
+    video.volume = audible ? 1 : 0;
+  }
+
+  function muteAllVideos() {
+    [videoA, videoB].forEach((v) => {
+      if (v) {
+        v.muted = true;
+        v.volume = 0;
+      }
+    });
+  }
+
+  function syncActiveAudio() {
+    muteAllVideos();
+    applyAudioForClip(activeVideo(), currentKey);
+  }
+
+  function setSoundsEnabled(on) {
+    soundsEnabled = !!on;
+    syncActiveAudio();
   }
 
   function setReducedMotion(on) {
     reducedMotion = !!on;
     if (reducedMotion) {
+      muteAllVideos();
       activeVideo()?.pause();
       renderVisible();
     } else {
+      syncActiveAudio();
       activeVideo()?.play().catch(() => {});
     }
   }
@@ -444,20 +711,32 @@ const Cat2Player = (() => {
     if (!aVis && !bVis) setCanvasVisible(activeCanvas(), true);
   }
 
-  function completeCrossfade(currC, nextC, nextV, then) {
+  /** Hide the inactive buffer so two clips never stack on screen. */
+  function settleSingleCanvas() {
+    const keep = activeCanvas();
+    const drop = active === 'a' ? canvasB : canvasA;
+    setCanvasVisible(drop, false);
+    setCanvasVisible(keep, true);
+    canvasA?.classList.remove('cat2-crossfade-top');
+    canvasB?.classList.remove('cat2-crossfade-top');
+  }
+
+  function completeCrossfade(currC, nextC, nextV, then, fadeMs = CROSSFADE_MS) {
+    crossfadeWatchStarted = performance.now();
     const nextCtx = ctxForCanvas(nextC);
-    const bgMode = Cat2Clips.get(nextV.dataset.clipKey)?.bgMode;
+    const nextClip = Cat2Clips.get(nextV.dataset.clipKey);
     const fadeStart = performance.now();
-    const maxWaitMs = 1800;
+    const maxWaitMs = fadeMs + 700;
 
     const tryFinish = () => {
-      renderFrame(nextV, nextC, nextCtx, bgMode);
+      renderFrame(nextV, nextC, nextCtx, nextClip);
       const elapsed = performance.now() - fadeStart;
-      const fadeDone = elapsed >= CROSSFADE_MS;
+      const fadeDone = elapsed >= fadeMs;
       const hasPixels = hasVisiblePixels(nextC, nextCtx);
 
       if (hasPixels && fadeDone) {
         crossfadeTimer = null;
+        crossfadeWatchStarted = 0;
         setCanvasVisible(currC, false);
         nextC.classList.remove('cat2-crossfade-top');
         then();
@@ -466,6 +745,7 @@ const Cat2Player = (() => {
 
       if (elapsed >= maxWaitMs) {
         crossfadeTimer = null;
+        crossfadeWatchStarted = 0;
         if (hasPixels) {
           setCanvasVisible(currC, false);
           nextC.classList.remove('cat2-crossfade-top');
@@ -487,7 +767,24 @@ const Cat2Player = (() => {
     tryFinish();
   }
 
+  function waitForVisibleFrame(video, canvas, then, maxWaitMs = 400) {
+    const ctx = ctxForCanvas(canvas);
+    const clipMeta = Cat2Clips.get(video.dataset.clipKey);
+    const start = performance.now();
+    const tick = () => {
+      renderFrame(video, canvas, ctx, clipMeta);
+      if (hasVisiblePixels(canvas, ctx) || performance.now() - start >= maxWaitMs) {
+        then();
+        return;
+      }
+      setTimeout(tick, 24);
+    };
+    tick();
+  }
+
   function restartActiveClip() {
+    cancelPending();
+    clearCrossfadeTimer();
     const video = activeVideo();
     if (!video || video.readyState < 2) return false;
     if (oneShotTimer) {
@@ -496,18 +793,35 @@ const Cat2Player = (() => {
     }
     video.currentTime = 0;
     lastLoopTime = 0;
+    clipEndedDispatched = null;
+    lastPlaybackTime = -1;
+    playbackStalledAt = 0;
     if (!reducedMotion) {
+      applyAudioForClip(video, currentKey);
       const playPromise = video.play();
       if (playPromise?.catch) playPromise.catch(() => {});
+    } else {
+      applyAudioForClip(video, currentKey);
     }
     renderVisible();
+    settleSingleCanvas();
     dispatchClipVisible(currentKey);
     return true;
   }
 
-  function switchClip(key, { crossfade = true, force = false } = {}) {
+  function preloadClip(key) {
     if (!videoA || !videoB) return;
-    if (!force && currentKey === key) return;
+    loadInto(inactiveVideo(), key);
+  }
+
+  function switchClip(key, { crossfade = true, force = false, crossfadeMs } = {}) {
+    const fadeMs = crossfadeMs ?? CROSSFADE_MS;
+    if (!videoA || !videoB) return;
+    if (currentKey === key) {
+      if (!force) return;
+      restartActiveClip();
+      return;
+    }
 
     cancelPending();
     clearCrossfadeTimer();
@@ -517,6 +831,7 @@ const Cat2Player = (() => {
       oneShotTimer = null;
     }
 
+    if (currentKey !== key) clipEndedDispatched = null;
     currentKey = key;
     const clip = Cat2Clips.get(key);
     const nextV = inactiveVideo();
@@ -525,11 +840,29 @@ const Cat2Player = (() => {
 
     loadInto(nextV, key);
 
-    const announceVisible = () => dispatchClipVisible(key);
+    const announceVisible = () => {
+      const key = nextV.dataset.clipKey;
+      if (key === 'walk' || key === 'butterfly') {
+        nextV.currentTime = 0;
+        lastLoopTime = 0;
+        if (!reducedMotion) {
+          const playPromise = nextV.play();
+          if (playPromise?.catch) playPromise.catch(() => {});
+        }
+        renderFrame(nextV, nextC, ctxForCanvas(nextC), Cat2Clips.get(key));
+      }
+      dispatchClipVisible(key);
+    };
 
     const startNext = () => {
       nextV.currentTime = 0;
       lastLoopTime = 0;
+      applyAudioForClip(nextV, key);
+      if (videoA && videoB) {
+        const otherV = nextV === videoA ? videoB : videoA;
+        otherV.muted = true;
+        otherV.volume = 0;
+      }
 
       if (!reducedMotion) {
         const playPromise = nextV.play();
@@ -541,52 +874,62 @@ const Cat2Player = (() => {
         setCanvasVisible(nextC, true);
         setCanvasVisible(currC, true);
       } else {
-        setCanvasVisible(canvasA, nextC === canvasA);
-        setCanvasVisible(canvasB, nextC === canvasB);
+        setCanvasVisible(currC, false);
+        setCanvasVisible(nextC, true);
+        canvasA?.classList.remove('cat2-crossfade-top');
+        canvasB?.classList.remove('cat2-crossfade-top');
       }
 
       active = other(active);
+      if (!crossfade) settleSingleCanvas();
       renderVisible();
       dispatchClipChanged(key);
 
       if (clip.loop) {
         if (crossfade) {
-          completeCrossfade(currC, nextC, nextV, announceVisible);
+          const nextCtx = ctxForCanvas(nextC);
+          const nextClip = Cat2Clips.get(nextV.dataset.clipKey);
+          renderFrame(nextV, nextC, nextCtx, nextClip);
+          if (hasVisiblePixels(nextC, nextCtx)) {
+            completeCrossfade(currC, nextC, nextV, announceVisible, fadeMs);
+          } else {
+            waitForVisibleFrame(nextV, nextC, () => {
+              completeCrossfade(currC, nextC, nextV, announceVisible, fadeMs);
+            });
+          }
         } else {
           announceVisible();
         }
       } else {
-        let announced = false;
-        const finishCrossfade = (then) => {
-          if (crossfade) {
-            completeCrossfade(currC, nextC, nextV, then);
-          } else {
-            setCanvasVisible(currC, false);
-            nextC.classList.remove('cat2-crossfade-top');
-            then();
-          }
-        };
-        const forceFinish = () => {
-          if (announced) return;
-          announced = true;
-          nextV.removeEventListener('timeupdate', onTime);
-          nextV.removeEventListener('playing', onPlaying);
-          clearTimeout(fallbackTimer);
-          finishCrossfade(announceVisible);
-        };
-        const fire = () => {
-          if (announced) return;
-          if (nextV.readyState < 2 || nextV.currentTime <= 0) return;
-          renderFrame(nextV, nextC, ctxForCanvas(nextC), Cat2Clips.get(nextV.dataset.clipKey)?.bgMode);
-          if (!hasVisiblePixels(nextC, ctxForCanvas(nextC))) return;
-          forceFinish();
-        };
-        const onTime = () => fire();
-        const onPlaying = () => fire();
-        const fallbackTimer = setTimeout(forceFinish, 900);
-        nextV.addEventListener('playing', onPlaying, { once: true });
-        nextV.addEventListener('timeupdate', onTime);
-        if (!nextV.paused && nextV.currentTime > 0) fire();
+        if (!crossfade) {
+          announceVisible();
+        } else {
+          let announced = false;
+          const finishCrossfade = (then) => {
+            completeCrossfade(currC, nextC, nextV, then, fadeMs);
+          };
+          const forceFinish = () => {
+            if (announced) return;
+            announced = true;
+            nextV.removeEventListener('timeupdate', onTime);
+            nextV.removeEventListener('playing', onPlaying);
+            clearTimeout(fallbackTimer);
+            finishCrossfade(announceVisible);
+          };
+          const fire = () => {
+            if (announced) return;
+            if (nextV.readyState < 2 || nextV.currentTime <= 0) return;
+            renderFrame(nextV, nextC, ctxForCanvas(nextC), Cat2Clips.get(nextV.dataset.clipKey));
+            if (!hasVisiblePixels(nextC, ctxForCanvas(nextC))) return;
+            forceFinish();
+          };
+          const onTime = () => fire();
+          const onPlaying = () => fire();
+          const fallbackTimer = setTimeout(forceFinish, 900);
+          nextV.addEventListener('playing', onPlaying, { once: true });
+          nextV.addEventListener('timeupdate', onTime);
+          if (!nextV.paused && nextV.currentTime > 0) fire();
+        }
       }
     };
 
@@ -611,15 +954,16 @@ const Cat2Player = (() => {
   function syncFromState(opts = {}) {
     if (!stateCatEl) return;
     const next = Cat2Clips.forState(stateCatEl.dataset);
-    const fromOneShot = currentKey === 'eat' || currentKey === 'walk' || currentKey === 'butterfly' || currentKey === 'pet';
+    const fromOneShot = currentKey === 'eat' || currentKey === 'walk' || currentKey === 'butterfly' || currentKey === 'pet' || currentKey === 'meow' || currentKey === 'roll' || currentKey === 'groom' || currentKey === 'earpurr' || currentKey === 'grumpy';
     const immediate = opts.immediate ?? fromOneShot;
-    const crossfade = opts.crossfade ?? true;
+    const crossfade = opts.crossfade ?? !immediate;
     const pauseMs = opts.pauseMs ?? 0;
 
     queueClip(next, {
       immediate,
       crossfade,
       pauseMs,
+      crossfadeMs: opts.crossfadeMs,
       force: opts.force ?? immediate,
     });
   }
@@ -646,6 +990,7 @@ const Cat2Player = (() => {
     switchClip,
     queueClip,
     cancelPending,
+    preloadClip,
     getCurrentKey,
     getPlaybackState,
     isTransitioning,
@@ -654,7 +999,9 @@ const Cat2Player = (() => {
     syncFromState,
     bindStateElement,
     setReducedMotion,
+    setSoundsEnabled,
     stopRenderLoop,
+    forceRecover,
   };
 })();
 

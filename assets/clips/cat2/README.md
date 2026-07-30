@@ -12,6 +12,11 @@ Drop processed **MP4** clips here. Transparency is handled at runtime via canvas
 | `walk.mp4` | Window patrol (one-shot) |
 | `butterfly.mp4` | Chasing butterfly (one-shot) |
 | `pet.mp4` | Head petted (one-shot) |
+| `meow.mp4` | Idle meowing with audio (one-shot, ~10s) |
+| `roll.mp4` | Rolling on back cutely, silent (one-shot, ~5s) |
+| `groom.mp4` | Scratching and grooming, silent (one-shot, ~5s) |
+| `earpurr.mp4` | Purring and scratching ears, silent (one-shot, ~5s) |
+| `grumpy.mp4` | Grumpy at human, silent (one-shot, ~5s) |
 | `sleep.mp4` | Sleeping — first 3s trimmed from source (loop) |
 
 ## Process from source videos

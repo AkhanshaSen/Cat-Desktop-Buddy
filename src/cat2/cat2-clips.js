@@ -46,6 +46,8 @@ const Cat2Clips = (() => {
       version: 1,
       bgMode: 'black',
       label: 'Walking',
+      moveStart: 0.04,
+      moveEnd: 0.56,
     },
     butterfly: {
       src: `${BASE}/butterfly.mp4`,
@@ -54,6 +56,8 @@ const Cat2Clips = (() => {
       version: 1,
       bgMode: 'black',
       label: 'Chasing butterfly',
+      moveStart: 0.14,
+      moveEnd: 0.72,
     },
     pet: {
       src: `${BASE}/pet.mp4`,
@@ -62,6 +66,47 @@ const Cat2Clips = (() => {
       version: 1,
       bgMode: 'black',
       label: 'Head petted / purr',
+    },
+    meow: {
+      src: `${BASE}/meow.mp4`,
+      loop: false,
+      durationSec: 10,
+      version: 1,
+      bgMode: 'black',
+      hasAudio: true,
+      label: 'Meowing',
+    },
+    roll: {
+      src: `${BASE}/roll.mp4`,
+      loop: false,
+      durationSec: 5,
+      version: 1,
+      bgMode: 'black',
+      label: 'Rolling on back',
+    },
+    groom: {
+      src: `${BASE}/groom.mp4`,
+      loop: false,
+      durationSec: 5,
+      version: 1,
+      bgMode: 'black',
+      label: 'Scratching and grooming',
+    },
+    earpurr: {
+      src: `${BASE}/earpurr.mp4`,
+      loop: false,
+      durationSec: 5,
+      version: 1,
+      bgMode: 'black',
+      label: 'Purring and scratching ears',
+    },
+    grumpy: {
+      src: `${BASE}/grumpy.mp4`,
+      loop: false,
+      durationSec: 5,
+      version: 1,
+      bgMode: 'black',
+      label: 'Grumpy at human',
     },
   };
 
@@ -78,6 +123,11 @@ const Cat2Clips = (() => {
     if (dataset.pose === 'eat') return 'eat';
     if (dataset.walking === 'true') return 'walk';
     if (dataset.playing === 'butterfly') return 'butterfly';
+    if (dataset.playing === 'meow') return 'meow';
+    if (dataset.playing === 'roll') return 'roll';
+    if (dataset.playing === 'groom') return 'groom';
+    if (dataset.playing === 'earpurr') return 'earpurr';
+    if (dataset.playing === 'grumpy') return 'grumpy';
     if (dataset.playing === 'pet') return 'pet';
     if (dataset.pose === 'sleep' || dataset.sleeping === 'true') return 'sleep';
     return DEFAULT_CLIP;
