@@ -954,7 +954,7 @@ const Cat2Player = (() => {
   function syncFromState(opts = {}) {
     if (!stateCatEl) return;
     const next = Cat2Clips.forState(stateCatEl.dataset);
-    const fromOneShot = currentKey === 'eat' || currentKey === 'walk' || currentKey === 'butterfly' || currentKey === 'pet' || currentKey === 'meow' || currentKey === 'roll' || currentKey === 'groom' || currentKey === 'earpurr' || currentKey === 'grumpy';
+    const fromOneShot = currentKey === 'eat' || currentKey === 'walk' || currentKey === 'butterfly' || currentKey === 'pet' || currentKey === 'meow' || currentKey === 'roll' || currentKey === 'groom' || currentKey === 'earpurr' || currentKey === 'grumpy' || currentKey === 'woolball';
     const immediate = opts.immediate ?? fromOneShot;
     const crossfade = opts.crossfade ?? !immediate;
     const pauseMs = opts.pauseMs ?? 0;

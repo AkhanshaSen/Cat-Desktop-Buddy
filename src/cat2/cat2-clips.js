@@ -108,6 +108,14 @@ const Cat2Clips = (() => {
       bgMode: 'black',
       label: 'Grumpy at human',
     },
+    woolball: {
+      src: `${BASE}/woolball.mp4`,
+      loop: false,
+      durationSec: 10,
+      version: 1,
+      bgMode: 'black',
+      label: 'Playing with wool ball',
+    },
   };
 
   function get(name) {
@@ -128,6 +136,7 @@ const Cat2Clips = (() => {
     if (dataset.playing === 'groom') return 'groom';
     if (dataset.playing === 'earpurr') return 'earpurr';
     if (dataset.playing === 'grumpy') return 'grumpy';
+    if (dataset.playing === 'woolball') return 'woolball';
     if (dataset.playing === 'pet') return 'pet';
     if (dataset.pose === 'sleep' || dataset.sleeping === 'true') return 'sleep';
     return DEFAULT_CLIP;

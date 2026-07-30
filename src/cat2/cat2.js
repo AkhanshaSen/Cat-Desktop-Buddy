@@ -179,6 +179,16 @@
       { text: 'Closed the door mid-pet. Who does that?!', expression: 'sad' },
       { text: 'Ate something crunchy without sharing. Unacceptable.', expression: 'sad' },
     ],
+    woolball: [
+      { text: '*bat bat* Wool ball! 🧶', expression: 'excited' },
+      { text: 'Mine mine mine~ round fuzzy prey!', expression: 'excited' },
+      { text: '*pounce* Gotcha! …nope, it rolled away.', expression: 'happy' },
+      { text: 'This yarn ball understands me.', expression: 'love' },
+      { text: '*bunny kick* Take that, wool!', expression: 'excited' },
+      { text: 'Professional wool-ball hunter on duty~ 🐾', expression: 'happy' },
+      { text: '*chase chase* Come back here, fuzzy sphere!', expression: 'excited' },
+      { text: 'Best toy ever. Don\'t touch my ball.', expression: 'happy' },
+    ],
     eatStart: [
       { text: 'Yay! Food time~ 😋', expression: 'happy' },
       { text: '*nom nom nom* Finally!', expression: 'happy' },
@@ -228,6 +238,7 @@
   let groomEndedListener = null;
   let earPurrEndedListener = null;
   let grumpyEndedListener = null;
+  let woolballEndedListener = null;
   let petEndedListener = null;
   let petSession = 0;
   let isPetting = false;
@@ -790,6 +801,7 @@
       catEl.dataset.playing === 'groom' ||
       catEl.dataset.playing === 'earpurr' ||
       catEl.dataset.playing === 'grumpy' ||
+      catEl.dataset.playing === 'woolball' ||
       Cat2Player.isTransitioning?.();
   }
 
@@ -828,6 +840,10 @@
     }
     if (catEl.dataset.playing === 'grumpy') {
       finishGrumpy();
+      return;
+    }
+    if (catEl.dataset.playing === 'woolball') {
+      finishWoolball();
       return;
     }
     if (catEl.dataset.playing === 'pet') {
@@ -1136,6 +1152,47 @@
     };
     window.addEventListener('cat2:clip-ended', grumpyEndedListener);
     armActivityWatchdog('grumpy', finishGrumpy);
+    return true;
+  }
+
+  function detachWoolballListener() {
+    if (!woolballEndedListener) return;
+    window.removeEventListener('cat2:clip-ended', woolballEndedListener);
+    woolballEndedListener = null;
+  }
+
+  function finishWoolball() {
+    detachWoolballListener();
+    clearActivityWatchdog();
+    catEl.dataset.playing = '';
+    isBusy = false;
+    animLock = false;
+    setExpression('happy', { skipSync: true });
+    snapVideoClip();
+  }
+
+  function startWoolballActivity() {
+    if (!canDoActivity()) return false;
+    if (catEl.dataset.begging === 'true' || awaitingFoodChoice) return false;
+    if (isPettingNow()) return false;
+    if (Cat2Player.getCurrentKey() !== 'idle') return false;
+    if (catEl.dataset.playing === 'woolball') return false;
+    if (Cat2Player.isTransitioning?.()) return false;
+
+    isBusy = true;
+    animLock = true;
+    catEl.dataset.playing = 'woolball';
+    setExpression('excited', { skipSync: true });
+    sayDialogue('woolball', 5500);
+    snapVideoClip();
+
+    detachWoolballListener();
+    woolballEndedListener = (ev) => {
+      if (ev.detail?.key !== 'woolball') return;
+      finishWoolball();
+    };
+    window.addEventListener('cat2:clip-ended', woolballEndedListener);
+    armActivityWatchdog('woolball', finishWoolball);
     return true;
   }
 
@@ -2001,7 +2058,7 @@
   }
 
   function shuffledActivityOptions() {
-    let options = ['butterfly', 'walk', 'sleep', 'meow', 'roll', 'groom', 'earpurr', 'grumpy'];
+    let options = ['butterfly', 'walk', 'sleep', 'meow', 'roll', 'groom', 'earpurr', 'grumpy', 'woolball'];
     if (lastRandomActivity === 'sleep' || Date.now() < postMealCooldownUntil) {
       options = options.filter((o) => o !== 'sleep');
     }
@@ -2019,6 +2076,9 @@
     }
     if (lastRandomActivity === 'grumpy') {
       options = options.filter((o) => o !== 'grumpy');
+    }
+    if (lastRandomActivity === 'woolball') {
+      options = options.filter((o) => o !== 'woolball');
     }
     for (let i = options.length - 1; i > 0; i -= 1) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -2043,6 +2103,7 @@
       else if (choice === 'groom') started = startGroomActivity();
       else if (choice === 'earpurr') started = startEarPurrActivity();
       else if (choice === 'grumpy') started = startGrumpyActivity();
+      else if (choice === 'woolball') started = startWoolballActivity();
       else started = goToSleepClip();
 
       if (started) {
