@@ -31,6 +31,39 @@
 
   /** Cat 2 — idle / hungry / eat clip flow only */
   const CLIP_FLOW_MODE = true;
+  const CAT2_ACTIVITY_LOG = true;
+  const cat2LogSessionStart = Date.now();
+
+  function cat2Snapshot() {
+    return {
+      playing: catEl?.dataset?.playing || '',
+      begging: catEl?.dataset?.begging === 'true',
+      clip: typeof Cat2Player !== 'undefined' ? Cat2Player.getCurrentKey?.() : null,
+      transitioning: Cat2Player?.isTransitioning?.() ?? false,
+      busy: isBusy,
+      animLock,
+      eating: isEating,
+      sleeping: isSleeping,
+      walking: isWalking,
+      petting: typeof isPettingNow === 'function' ? isPettingNow() : isPetting,
+      foodChoice: awaitingFoodChoice,
+      foodFlow: foodFlowActive,
+      postMeal: postMealPhase,
+      foodMood,
+      focus: isFocusMode,
+    };
+  }
+
+  function cat2ActivityLog(event, activity, details = {}) {
+    if (!CAT2_ACTIVITY_LOG || !CLIP_FLOW_MODE) return;
+    const ts = new Date().toISOString();
+    const elapsedMs = Date.now() - cat2LogSessionStart;
+    console.log(
+      `[Cat2 Activity] ${ts} (+${elapsedMs}ms) ${event} → ${activity}`,
+      { ...details, state: cat2Snapshot() }
+    );
+  }
+
   const FEED_INTERVAL_DEFAULT_MS = 5 * 60 * 1000;
   const PET_SNAP_OPTS = { immediate: true, crossfade: false, pauseMs: 0 };
   const ACTIVITY_SNAP_OPTS = PET_SNAP_OPTS;
@@ -472,6 +505,7 @@
     foodChoice?.classList.remove('hidden');
     catEl.classList.add('feed-prompt-open');
     setExpression('sad');
+    cat2ActivityLog('feed-prompt', 'show');
     return true;
   }
 
@@ -685,14 +719,17 @@
   function armActivityWatchdog(clipKey, onTimeout, extraMs = 900) {
     clearActivityWatchdog();
     const ms = Cat2Clips.getDurationMs(clipKey) + extraMs;
+    cat2ActivityLog('watchdog-arm', clipKey, { timeoutMs: ms });
     activityWatchdog = setTimeout(() => {
       activityWatchdog = null;
+      cat2ActivityLog('watchdog-fire', clipKey);
       onTimeout();
     }, ms);
   }
 
   function recoverFromStateMismatch() {
     stateMismatchSince = 0;
+    cat2ActivityLog('recover', 'state-mismatch');
     const expected = Cat2Clips.forState(catEl.dataset);
     if (expected === 'idle' && !postMealPhase && !isEating && !isWalking && !isPettingNow()) {
       isBusy = false;
@@ -818,6 +855,8 @@
     if (activityTimeout) clearTimeout(activityTimeout);
     activityTimeout = null;
     if (!force && isPettingNow()) return;
+    const playing = catEl.dataset.playing;
+    if (playing) cat2ActivityLog('interrupt', playing, { force });
     if (catEl.dataset.playing === 'butterfly') {
       finishButterflyChase();
       return;
@@ -902,6 +941,7 @@
   }
 
   function finishButterflyChase() {
+    cat2ActivityLog('end', 'butterfly');
     detachButterflyListener();
     clearActivityWatchdog();
     stopClipMovement();
@@ -943,6 +983,7 @@
     };
     window.addEventListener('cat2:clip-ended', butterflyEndedListener);
     armActivityWatchdog('butterfly', finishButterflyChase);
+    cat2ActivityLog('start', 'butterfly');
     return true;
   }
 
@@ -953,6 +994,7 @@
   }
 
   function finishMeow() {
+    cat2ActivityLog('end', 'meow');
     detachMeowListener();
     clearActivityWatchdog();
     catEl.dataset.playing = '';
@@ -987,6 +1029,7 @@
       if (postMealPhase === 'meow') completePostMealSequence();
       else finishMeow();
     });
+    cat2ActivityLog('start', 'meow', { postMeal: postMealPhase === 'meow' });
     return true;
   }
 
@@ -997,6 +1040,7 @@
   }
 
   function finishRoll() {
+    cat2ActivityLog('end', 'roll');
     detachRollListener();
     clearActivityWatchdog();
     catEl.dataset.playing = '';
@@ -1028,6 +1072,7 @@
     };
     window.addEventListener('cat2:clip-ended', rollEndedListener);
     armActivityWatchdog('roll', finishRoll);
+    cat2ActivityLog('start', 'roll');
     return true;
   }
 
@@ -1038,6 +1083,7 @@
   }
 
   function finishGroom() {
+    cat2ActivityLog('end', 'groom');
     detachGroomListener();
     clearActivityWatchdog();
     catEl.dataset.playing = '';
@@ -1069,6 +1115,7 @@
     };
     window.addEventListener('cat2:clip-ended', groomEndedListener);
     armActivityWatchdog('groom', finishGroom);
+    cat2ActivityLog('start', 'groom');
     return true;
   }
 
@@ -1079,6 +1126,7 @@
   }
 
   function finishEarPurr() {
+    cat2ActivityLog('end', 'earpurr');
     detachEarPurrListener();
     clearActivityWatchdog();
     catEl.dataset.playing = '';
@@ -1110,6 +1158,7 @@
     };
     window.addEventListener('cat2:clip-ended', earPurrEndedListener);
     armActivityWatchdog('earpurr', finishEarPurr);
+    cat2ActivityLog('start', 'earpurr');
     return true;
   }
 
@@ -1120,6 +1169,7 @@
   }
 
   function finishGrumpy() {
+    cat2ActivityLog('end', 'grumpy');
     detachGrumpyListener();
     clearActivityWatchdog();
     catEl.dataset.playing = '';
@@ -1130,7 +1180,7 @@
     if (isCursorNearCat()) lastCursorNearAt = Date.now();
   }
 
-  function startGrumpyActivity() {
+  function startGrumpyActivity(opts = {}) {
     if (!canDoActivity()) return false;
     if (catEl.dataset.begging === 'true' || awaitingFoodChoice) return false;
     if (isPettingNow()) return false;
@@ -1152,6 +1202,7 @@
     };
     window.addEventListener('cat2:clip-ended', grumpyEndedListener);
     armActivityWatchdog('grumpy', finishGrumpy);
+    cat2ActivityLog('start', 'grumpy', { trigger: opts.trigger || 'idle', ...opts });
     return true;
   }
 
@@ -1162,6 +1213,7 @@
   }
 
   function finishWoolball() {
+    cat2ActivityLog('end', 'woolball');
     detachWoolballListener();
     clearActivityWatchdog();
     catEl.dataset.playing = '';
@@ -1193,6 +1245,7 @@
     };
     window.addEventListener('cat2:clip-ended', woolballEndedListener);
     armActivityWatchdog('woolball', finishWoolball);
+    cat2ActivityLog('start', 'woolball');
     return true;
   }
 
@@ -1223,7 +1276,8 @@
     if (catEl.dataset.playing === 'grumpy') return;
     if (Date.now() - lastCursorNearAt < CURSOR_AWAY_GRUMPY_MS) return;
 
-    if (startGrumpyActivity()) {
+    const awayMs = Date.now() - lastCursorNearAt;
+    if (startGrumpyActivity({ trigger: 'cursor-away', awayMs })) {
       lastCursorNearAt = Date.now();
       lastRandomActivity = 'grumpy';
     }
@@ -1242,6 +1296,7 @@
   }
 
   function finishPet() {
+    cat2ActivityLog('end', 'pet');
     detachPetListener();
     clearActivityWatchdog();
     isPetting = false;
@@ -1293,6 +1348,7 @@
   }
 
   function startPostMealPetPhase() {
+    cat2ActivityLog('start', 'pet', { trigger: 'post-meal' });
     postMealPhase = 'pet';
     isPetting = true;
     isBusy = true;
@@ -1330,6 +1386,7 @@
 
   function startPostMealMeowPhase() {
     if (postMealPhase === 'meow') return;
+    cat2ActivityLog('start', 'meow', { trigger: 'post-meal' });
     postMealPhase = 'meow';
     isBusy = true;
     animLock = true;
@@ -1351,6 +1408,7 @@
 
   function completePostMealSequence() {
     if (!postMealPhase) return;
+    cat2ActivityLog('end', 'post-meal', { phase: postMealPhase });
     clearActivityWatchdog();
     clearPostMealHearts();
     detachMeowListener();
@@ -1406,8 +1464,10 @@
 
     if (alreadyPetting || Cat2Player.getCurrentKey() === 'pet') {
       Cat2Player.restartActiveClip();
+      cat2ActivityLog('restart', 'pet');
     } else {
       syncPetClip();
+      cat2ActivityLog('start', 'pet', { trigger: 'head-pet' });
     }
 
     detachPetListener();
@@ -1456,11 +1516,13 @@
     catEl.dataset.begging = 'true';
     setExpression('sad');
     snapVideoClip();
+    cat2ActivityLog('start', 'feed-beg');
     if (!tryShowFeedPrompt()) scheduleFeedPromptRetry();
     return true;
   }
 
   function hideFeedPrompt() {
+    if (awaitingFoodChoice) cat2ActivityLog('feed-prompt', 'hide');
     awaitingFoodChoice = false;
     foodChoice?.classList.add('hidden');
     catEl.classList.remove('feed-prompt-open');
@@ -1476,6 +1538,7 @@
 
   function acceptFood() {
     if (catEl.dataset.begging !== 'true' || isEating) return;
+    cat2ActivityLog('feed-choice', 'yes');
     foodFlowActive = true;
     animLock = true;
     if (sleepTimeout) clearTimeout(sleepTimeout);
@@ -1487,6 +1550,7 @@
 
   function declineFoodAndWalk() {
     if (!awaitingFoodChoice || catEl.dataset.begging !== 'true') return;
+    cat2ActivityLog('feed-choice', 'no');
     foodFlowActive = true;
     animLock = true;
     clearFeedPromptTimers();
@@ -1646,6 +1710,7 @@
   }
 
   function finishWalk() {
+    cat2ActivityLog('end', 'walk', { walkThenSleep });
     stopWalkMovement();
     if (!isWalking) return;
     stopWalk();
@@ -1691,11 +1756,13 @@
     sleepTimeout = setTimeout(() => {
       wakeFromSleepFlow();
     }, sleepMs);
+    cat2ActivityLog('start', 'sleep', { durationMs: sleepMs, force });
     return true;
   }
 
   function wakeFromSleepFlow() {
     if (!isSleeping) return;
+    cat2ActivityLog('end', 'sleep');
     if (sleepTimeout) clearTimeout(sleepTimeout);
     catEl.dataset.sleeping = '';
     isBusy = false;
@@ -1766,6 +1833,7 @@
       walkTimeout = null;
       finishWalk();
     });
+    cat2ActivityLog('start', 'walk', { afterDecline, dir });
     return true;
   }
   function resetBowlPosition() {
@@ -1852,6 +1920,7 @@
 
     foodFlowActive = true;
     animLock = true;
+    cat2ActivityLog('start', 'eat', { foodType: foodType || 'scheduled' });
     if (sleepTimeout) clearTimeout(sleepTimeout);
     catEl.dataset.sleeping = '';
     Cat2Player.cancelPending?.();
@@ -1860,6 +1929,7 @@
 
     const finishEating = () => {
       if (!isEating) return;
+      cat2ActivityLog('end', 'eat');
       if (eatEndedListener) {
         window.removeEventListener('cat2:clip-ended', eatEndedListener);
         eatEndedListener = null;
@@ -1964,6 +2034,7 @@
 
   function wakeUp() {
     if (!isSleeping) return false;
+    cat2ActivityLog('interrupt', 'sleep', { trigger: 'wakeUp' });
     if (CLIP_FLOW_MODE) {
       wakeFromSleepFlow();
     } else {
@@ -2094,7 +2165,10 @@
     if (catEl.dataset.begging === 'true' || awaitingFoodChoice) return false;
     if (Cat2Player.isTransitioning?.()) return false;
 
-    for (const choice of shuffledActivityOptions()) {
+    const options = shuffledActivityOptions();
+    cat2ActivityLog('idle-tick', 'pick-random', { options });
+
+    for (const choice of options) {
       let started = false;
       if (choice === 'butterfly') started = await startButterflyChase();
       else if (choice === 'walk') started = await startWalk();
@@ -2108,9 +2182,12 @@
 
       if (started) {
         lastRandomActivity = choice;
+        cat2ActivityLog('idle-pick', choice, { started: true });
         return true;
       }
+      cat2ActivityLog('idle-pick', choice, { started: false });
     }
+    cat2ActivityLog('idle-pick', 'none', { reason: 'all-skipped' });
     return false;
   }
 
@@ -2509,8 +2586,16 @@
   setFocusMode(!!initialSettings.focusMode);
 
   catEl.classList.add('cat2-mode');
+  cat2ActivityLog('init', 'cat2', { activityLog: CAT2_ACTIVITY_LOG });
 
+  window.addEventListener('cat2:clip-changed', (ev) => {
+    cat2ActivityLog('clip-changed', ev.detail?.key ?? '?');
+  });
+  window.addEventListener('cat2:clip-ended', (ev) => {
+    cat2ActivityLog('clip-ended', ev.detail?.key ?? '?');
+  });
   window.addEventListener('cat2:clip-visible', (ev) => {
+    cat2ActivityLog('clip-visible', ev.detail?.key ?? '?');
     if (ev.detail?.key === 'hungry') showFeedPrompt();
     if (ev.detail?.key === 'walk') onWalkClipVisible();
     if (ev.detail?.key === 'butterfly') onButterflyClipVisible();
@@ -2522,6 +2607,7 @@
   });
 
   window.addEventListener('cat2:clip-loop', (ev) => {
+    cat2ActivityLog('clip-loop', ev.detail?.key ?? '?');
     if (ev.detail?.key === 'hungry') showFeedPrompt();
   });
 
@@ -2566,5 +2652,7 @@
     showFoodChoice, hideFoodChoice, setFocusMode, snoozeBreak,
     isPetting: isPettingNow,
     isAwaitingFoodChoice: () => awaitingFoodChoice,
+    cat2ActivityLog,
+    cat2Snapshot,
   };
 })();
