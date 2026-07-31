@@ -16,9 +16,9 @@
     "test:cat2-walk": "node scripts/test-cat2-walk-sync.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
-    "dist:mac": "electron-builder --mac",
-    "dist:win": "electron-builder --win",
-    "dist:linux": "electron-builder --linux"
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:win": "electron-builder --win --publish never",
+    "dist:linux": "electron-builder --linux --publish never"
   },
   "keywords": ["desktop-pet", "cat", "buddy", "electron"],
   "author": "Akhansha_Sen",
@@ -58,7 +58,10 @@
     },
     "win": {
       "target": ["nsis", "portable"],
-      "signAndEditExecutable": false
+      "sign": null,
+      "signDlls": false,
+      "signAndEditExecutable": false,
+      "verifyUpdateCodeSignature": false
     },
     "linux": {
       "target": ["AppImage", "deb"],

@@ -3,12 +3,29 @@ name: Build desktop installers
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-desktop.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'launcher-main.js'
+      - 'preload-launcher.js'
+      - 'src/**'
+      - 'main/**'
+      - 'assets/clips/**'
+      - 'main.js'
+      - 'preload.js'
     tags:
       - 'v*'
 
+permissions:
+  contents: read
+
 env:
-  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GH_TOKEN: ${{ github.token }}
   CSC_IDENTITY_AUTO_DISCOVERY: false
+  ELECTRON_BUILDER_DISABLE_WINDOWS_CODE_SIGNING: true
 
 jobs:
   build-mac:
@@ -20,7 +37,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
 
       - name: Install dependencies
@@ -28,6 +45,8 @@ jobs:
 
       - name: Build Mac installer
         run: npm run dist:mac
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Upload Mac artifacts
         uses: actions/upload-artifact@v4
@@ -47,7 +66,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
 
       - name: Install dependencies
@@ -55,6 +74,8 @@ jobs:
 
       - name: Build Windows installer
         run: npm run dist:win
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
