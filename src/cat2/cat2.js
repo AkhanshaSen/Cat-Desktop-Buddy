@@ -49,8 +49,9 @@
       sleeping: isSleeping,
       walking: isWalking,
       petting: typeof isPettingNow === 'function' ? isPettingNow() : isPetting,
-      foodChoice: awaitingFoodChoice,
-      foodFlow: foodFlowActive,
+      foodChoice: feedState?.isAwaitingChoice?.() ?? false,
+      feedPhase: feedState?.getPhase?.() ?? 'idle',
+      foodFlow: feedState?.isFlowActive?.() ?? false,
       postMeal: postMealPhase,
       foodMood,
       focus: isFocusMode,
@@ -66,6 +67,10 @@
       { ...details, state: cat2Snapshot() }
     );
   }
+
+  const feedState = Cat2State.createFeedStateMachine(catEl, (event, activity, details) => {
+    cat2ActivityLog(event, activity, details);
+  });
 
   const FEED_INTERVAL_OPTIONS = [2, 5, 10, 15, 30];
   const FEED_INTERVAL_DEFAULT_MS = 5 * 60 * 1000;
@@ -299,8 +304,6 @@
   let walkTimeout = null;
   let foodMood = null;        // 'good' | 'grumpy' | null
   let foodMoodTimeout = null;
-  let awaitingFoodChoice = false;
-  let foodFlowActive = false;
   let foodChoiceTimeout = null;
   let feedScheduleTimeout = null;
   let feedPromptRetryTimeout = null;
@@ -451,286 +454,122 @@
   let breakGlowInterval = null;
 
   /* ── Food bowl cooldown ── */
-  function loadBowlCooldown() {
-    if (CLIP_FLOW_MODE) {
-      bowlCooldownUntil = 0;
-      localStorage.removeItem(BOWL_COOLDOWN_KEY);
-      return;
-    }
-    const stored = localStorage.getItem(BOWL_COOLDOWN_KEY);
-    bowlCooldownUntil = stored ? parseInt(stored, 10) : 0;
-    updateBowlVisibility();
-  }
-
-  function clearFeedScheduleTimeout() {
-    if (feedScheduleTimeout) clearTimeout(feedScheduleTimeout);
-    feedScheduleTimeout = null;
-  }
-
-  function clearFeedSchedule() {
-    clearFeedScheduleTimeout();
-    stopHungerMeterLoop();
-    hungerMeter?.classList.add('hidden');
-  }
-
-  function hungerMeterColor(progress) {
-    const p = Math.max(0, Math.min(1, progress));
-    let hue;
-    if (p < 0.55) {
-      hue = 128 - (p / 0.55) * 38;
-    } else if (p < 0.82) {
-      hue = 90 - ((p - 0.55) / 0.27) * 58;
-    } else {
-      hue = 32 - ((p - 0.82) / 0.18) * 32;
-    }
-    const light = 44 + p * 8;
-    return `hsl(${hue}, 76%, ${light}%)`;
-  }
-
-  function getHungerProgress() {
-    if (catEl.dataset.begging === 'true' || awaitingFoodChoice ||
-        foodFlowActive || isEating || postMealPhase) {
-      return 1;
-    }
-    if (!hungerCycleStartAt || !hungerCycleDurationMs) return 0;
-    return Math.min(1, (Date.now() - hungerCycleStartAt) / hungerCycleDurationMs);
-  }
-
-  function updateHungerMeter() {
-    if (!CLIP_FLOW_MODE || !hungerMeterFill) return;
-
-    if (getSettings().focusMode || isFocusMode) {
-      hungerMeter?.classList.add('hidden');
-      return;
-    }
-
-    hungerMeter?.classList.remove('hidden');
-    const progress = getHungerProgress();
-    hungerMeterFill.style.height = `${progress * 100}%`;
-    hungerMeterFill.style.backgroundColor = hungerMeterColor(progress);
-    hungerMeter?.setAttribute('aria-valuenow', String(Math.round(progress * 100)));
-  }
-
-  function stopHungerMeterLoop() {
-    if (hungerMeterRaf) {
-      cancelAnimationFrame(hungerMeterRaf);
-      hungerMeterRaf = null;
-    }
-  }
-
-  function startHungerMeterLoop() {
-    stopHungerMeterLoop();
-    const tick = () => {
-      updateHungerMeter();
-      hungerMeterRaf = requestAnimationFrame(tick);
-    };
-    hungerMeterRaf = requestAnimationFrame(tick);
-  }
-
-  function startHungerMeterCycle(durationMs = getFeedIntervalMs()) {
-    hungerCycleStartAt = Date.now();
-    hungerCycleDurationMs = Math.max(1000, durationMs);
-    startHungerMeterLoop();
-    updateHungerMeter();
-  }
-
-  function clearFeedPromptTimers() {
-    if (feedPromptRetryTimeout) clearTimeout(feedPromptRetryTimeout);
-    feedPromptRetryTimeout = null;
-    if (foodChoiceTimeout) clearTimeout(foodChoiceTimeout);
-    foodChoiceTimeout = null;
-  }
-
-  function tryShowFeedPrompt() {
-    if (catEl.dataset.begging !== 'true') return false;
-    if (awaitingFoodChoice) return true;
-    if (isEating || isSleeping) return false;
-
-    awaitingFoodChoice = true;
-    foodFlowActive = true;
-    hideSpeech();
-    foodChoice?.classList.remove('hidden');
-    catEl.classList.add('feed-prompt-open');
-    setExpression('sad');
-    cat2ActivityLog('feed-prompt', 'show');
-    return true;
-  }
-
-  function ensureFeedPromptVisible() {
-    if (!CLIP_FLOW_MODE) return false;
-    if (isEating || isSleeping) return false;
-
-    const uiVisible = foodChoice && !foodChoice.classList.contains('hidden');
-    if (catEl.dataset.begging !== 'true' && !awaitingFoodChoice && !uiVisible) return false;
-
-    if (catEl.dataset.begging !== 'true') {
-      catEl.dataset.begging = 'true';
-      snapVideoClip();
-    }
-
-    awaitingFoodChoice = true;
-    foodFlowActive = true;
-    hideSpeech();
-    foodChoice?.classList.remove('hidden');
-    catEl.classList.add('feed-prompt-open');
-    setExpression('sad');
-    return true;
-  }
-
-  function refreshFeedPromptAfterChat() {
-    requestAnimationFrame(() => {
-      if (!ensureFeedPromptVisible()) return;
-      scheduleFeedPromptRetry();
-    });
-    return true;
-  }
-
-  function scheduleFeedPromptRetry() {
-    if (feedPromptRetryTimeout) clearTimeout(feedPromptRetryTimeout);
-    if (catEl.dataset.begging !== 'true' || awaitingFoodChoice) return;
-    feedPromptRetryTimeout = setTimeout(() => {
-      feedPromptRetryTimeout = null;
-      if (tryShowFeedPrompt()) return;
-      scheduleFeedPromptRetry();
-    }, 1000);
-  }
 
   /** Cat 2 — ask for food on a user-configured interval. */
-  function scheduleFeedRequest(delayMs = getFeedIntervalMs()) {
-    if (!CLIP_FLOW_MODE) return;
-    clearFeedScheduleTimeout();
-    startHungerMeterCycle(delayMs);
-
-    const tryBeg = () => {
-      feedScheduleTimeout = null;
-      if (getSettings().focusMode || isFocusMode) {
-        feedScheduleTimeout = setTimeout(tryBeg, 2000);
-        return;
-      }
-      if (isEating) {
-        feedScheduleTimeout = setTimeout(tryBeg, 1000);
-        return;
-      }
-      if (awaitingFoodChoice) {
-        feedScheduleTimeout = setTimeout(tryBeg, 2000);
-        return;
-      }
-      if (catEl.dataset.begging === 'true') {
-        tryShowFeedPrompt();
-        scheduleFeedPromptRetry();
-        feedScheduleTimeout = setTimeout(tryBeg, 2000);
-        return;
-      }
-      if (foodFlowActive) {
-        foodFlowActive = false;
-      }
-      if (!canDoActivity() || Cat2Player.isTransitioning?.()) {
-        feedScheduleTimeout = setTimeout(tryBeg, 500);
-        return;
-      }
-      if (Cat2Player.getCurrentKey() !== 'idle') {
-        feedScheduleTimeout = setTimeout(tryBeg, 500);
-        return;
-      }
-      begForFood();
-    };
-
-    feedScheduleTimeout = setTimeout(tryBeg, delayMs);
-  }
-
-  function onFeedCycleComplete() {
-    if (!CLIP_FLOW_MODE) return;
-    scheduleFeedRequest(getFeedIntervalMs());
-  }
-
-  function saveBowlCooldown() {
-    localStorage.setItem(BOWL_COOLDOWN_KEY, String(bowlCooldownUntil));
-  }
-
-  function isBowlOnCooldown() {
-    return Date.now() < bowlCooldownUntil;
-  }
-
-  function startBowlCooldown() {
-    hideFoodBowl();
-    if (bowlCooldownTimeout) clearTimeout(bowlCooldownTimeout);
-    if (CLIP_FLOW_MODE) return;
-
-    bowlCooldownUntil = Date.now() + BOWL_COOLDOWN_MS;
-    saveBowlCooldown();
-    const remaining = bowlCooldownUntil - Date.now();
-    bowlCooldownTimeout = setTimeout(() => {
-      bowlCooldownUntil = 0;
-      localStorage.removeItem(BOWL_COOLDOWN_KEY);
-      showFoodBowl();
-    }, remaining);
-  }
-
-  function hideFoodBowl() {
-    foodBowl.classList.add('hidden', 'on-cooldown');
-    resetBowlPosition();
-  }
-
-  function showFoodBowl() {
-    if (CLIP_FLOW_MODE) return;
-    if (isBowlOnCooldown()) return;
-    foodBowl.classList.remove('hidden', 'on-cooldown');
-  }
-
-  function updateBowlVisibility() {
-    if (isBowlOnCooldown()) {
-      hideFoodBowl();
-      const remaining = bowlCooldownUntil - Date.now();
-      if (remaining > 0) {
-        if (bowlCooldownTimeout) clearTimeout(bowlCooldownTimeout);
-        bowlCooldownTimeout = setTimeout(() => {
-          bowlCooldownUntil = 0;
-          localStorage.removeItem(BOWL_COOLDOWN_KEY);
-          showFoodBowl();
-        }, remaining);
-      }
-    } else {
-      showFoodBowl();
-    }
-  }
 
   /* ── Food preferences (learned over time) ── */
-  function loadFoodPrefs() {
-    try {
-      const raw = localStorage.getItem(FOOD_PREFS_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw);
-      if (typeof saved.plain === 'number') foodPrefs.plain = Math.max(-5, Math.min(5, saved.plain));
-      if (typeof saved.fishy === 'number') foodPrefs.fishy = Math.max(-5, Math.min(5, saved.fishy));
-    } catch (_) { /* ignore */ }
+
+  const ctx = {
+    catEl, catFigure, catContainer, foodBowl, nomFloat, foodChoice,
+    hungerMeter, hungerMeterFill, activityProps, scratchStopPrompt,
+    quickStopScratchBtn, petHearts, feedState, CLIP_FLOW_MODE,
+    BOWL_COOLDOWN_MS, BOWL_COOLDOWN_KEY, FOOD_PREFS_KEY,
+    FEED_INTERVAL_OPTIONS, FEED_INTERVAL_DEFAULT_MS, FOOD_BEG_DIALOG,
+    FOOD_REACTIONS, CAT2_DIALOGUES, ACTIVITY_SNAP_OPTS,
+    IDLE_ACTIVITY_OPTIONS, PLAYFUL_ACTIVITY_OPTIONS,
+    MOOD_ACTIVITY_COOLDOWN_MS, MOOD_ACTIVITY_RECENT_LOOKBACK,
+    ACTIVITY_HISTORY_SIZE, IDLE_ACTIVITIES,
+    CURSOR_AWAY_GRUMPY_MS, CURSOR_NEAR_PAD_PX, foodPrefs,
+  };
+
+  function bindCtxState(key, getter, setter) {
+    Object.defineProperty(ctx, key, { get: getter, set: setter, enumerable: true });
   }
 
-  function saveFoodPrefs() {
-    localStorage.setItem(FOOD_PREFS_KEY, JSON.stringify(foodPrefs));
+  bindCtxState('isFocusMode', () => isFocusMode, (v) => { isFocusMode = v; });
+  bindCtxState('isSleeping', () => isSleeping, (v) => { isSleeping = v; });
+  bindCtxState('isEating', () => isEating, (v) => { isEating = v; });
+  bindCtxState('isBusy', () => isBusy, (v) => { isBusy = v; });
+  bindCtxState('isWalking', () => isWalking, (v) => { isWalking = v; });
+  bindCtxState('isPetting', () => isPetting, (v) => { isPetting = v; });
+  bindCtxState('animLock', () => animLock, (v) => { animLock = v; });
+  bindCtxState('breakAlertActive', () => breakAlertActive, (v) => { breakAlertActive = v; });
+  bindCtxState('walkThenSleep', () => walkThenSleep, (v) => { walkThenSleep = v; });
+  bindCtxState('foodMood', () => foodMood, (v) => { foodMood = v; });
+  bindCtxState('postMealPhase', () => postMealPhase, (v) => { postMealPhase = v; });
+  bindCtxState('postMealMeta', () => postMealMeta, (v) => { postMealMeta = v; });
+  bindCtxState('postMealCooldownUntil', () => postMealCooldownUntil, (v) => { postMealCooldownUntil = v; });
+  bindCtxState('postMealHeartInterval', () => postMealHeartInterval, (v) => { postMealHeartInterval = v; });
+  bindCtxState('petSession', () => petSession, (v) => { petSession = v; });
+  bindCtxState('lastRandomActivity', () => lastRandomActivity, (v) => { lastRandomActivity = v; });
+  bindCtxState('lastActivityStartedAt', () => lastActivityStartedAt, () => {});
+  bindCtxState('recentActivityHistory', () => recentActivityHistory, () => {});
+  bindCtxState('lastCursorNearAt', () => lastCursorNearAt, (v) => { lastCursorNearAt = v; });
+  bindCtxState('mouseX', () => mouseX, (v) => { mouseX = v; });
+  bindCtxState('mouseY', () => mouseY, (v) => { mouseY = v; });
+  bindCtxState('cursorAwayCheckInterval', () => cursorAwayCheckInterval, (v) => { cursorAwayCheckInterval = v; });
+  bindCtxState('clipMovementStarted', () => clipMovementStarted, (v) => { clipMovementStarted = v; });
+  bindCtxState('clipMovementKey', () => clipMovementKey, (v) => { clipMovementKey = v; });
+  bindCtxState('clipMoveRaf', () => clipMoveRaf, (v) => { clipMoveRaf = v; });
+  bindCtxState('walkPlacement', () => walkPlacement, (v) => { walkPlacement = v; });
+  bindCtxState('butterflyPlacement', () => butterflyPlacement, (v) => { butterflyPlacement = v; });
+  bindCtxState('walkTimeout', () => walkTimeout, (v) => { walkTimeout = v; });
+  bindCtxState('sleepTimeout', () => sleepTimeout, (v) => { sleepTimeout = v; });
+  bindCtxState('activityTimeout', () => activityTimeout, (v) => { activityTimeout = v; });
+  bindCtxState('activityWatchdog', () => activityWatchdog, (v) => { activityWatchdog = v; });
+  bindCtxState('walkEndedListener', () => walkEndedListener, (v) => { walkEndedListener = v; });
+  bindCtxState('butterflyEndedListener', () => butterflyEndedListener, (v) => { butterflyEndedListener = v; });
+  bindCtxState('meowEndedListener', () => meowEndedListener, (v) => { meowEndedListener = v; });
+  bindCtxState('rollEndedListener', () => rollEndedListener, (v) => { rollEndedListener = v; });
+  bindCtxState('groomEndedListener', () => groomEndedListener, (v) => { groomEndedListener = v; });
+  bindCtxState('earPurrEndedListener', () => earPurrEndedListener, (v) => { earPurrEndedListener = v; });
+  bindCtxState('grumpyEndedListener', () => grumpyEndedListener, (v) => { grumpyEndedListener = v; });
+  bindCtxState('woolballEndedListener', () => woolballEndedListener, (v) => { woolballEndedListener = v; });
+  bindCtxState('jumpEndedListener', () => jumpEndedListener, (v) => { jumpEndedListener = v; });
+  bindCtxState('scratchEndedListener', () => scratchEndedListener, (v) => { scratchEndedListener = v; });
+  bindCtxState('petEndedListener', () => petEndedListener, (v) => { petEndedListener = v; });
+  bindCtxState('hungerMeterRaf', () => hungerMeterRaf, (v) => { hungerMeterRaf = v; });
+  bindCtxState('feedScheduleTimeout', () => feedScheduleTimeout, (v) => { feedScheduleTimeout = v; });
+  bindCtxState('feedPromptRetryTimeout', () => feedPromptRetryTimeout, (v) => { feedPromptRetryTimeout = v; });
+  bindCtxState('foodChoiceTimeout', () => foodChoiceTimeout, (v) => { foodChoiceTimeout = v; });
+  bindCtxState('eatTimeout', () => eatTimeout, (v) => { eatTimeout = v; });
+  bindCtxState('bowlCooldownUntil', () => bowlCooldownUntil, (v) => { bowlCooldownUntil = v; });
+  bindCtxState('hungerCycleStartAt', () => hungerCycleStartAt, (v) => { hungerCycleStartAt = v; });
+  bindCtxState('hungerCycleDurationMs', () => hungerCycleDurationMs, (v) => { hungerCycleDurationMs = v; });
+  bindCtxState('lastWalkDir', () => lastWalkDir, (v) => { lastWalkDir = v; });
+  bindCtxState('idleLoopInterval', () => idleLoopInterval, (v) => { idleLoopInterval = v; });
+  bindCtxState('foodMoodTimeout', () => foodMoodTimeout, (v) => { foodMoodTimeout = v; });
+  bindCtxState('bowlCooldownTimeout', () => bowlCooldownTimeout, (v) => { bowlCooldownTimeout = v; });
+  bindCtxState('lastPetTime', () => lastPetTime, (v) => { lastPetTime = v; });
+  Object.defineProperty(ctx, 'foodPrefs', { get: () => foodPrefs });
+
+  function getCatMouthCenter() {
+    const layer = document.querySelector('.cat2-video-layer') || catFigure;
+    const rect = layer.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height * 0.72 };
   }
 
-  function getLikeChance(foodType) {
-    const pref = foodPrefs[foodType] || 0;
-    return Math.max(0.05, Math.min(0.95, 0.5 + pref / 10));
+  function wireCat2Modules() {
+    ctx.getSettings = getSettings;
+    ctx.getFeedIntervalMs = getFeedIntervalMs;
+    ctx.isReducedMotion = isReducedMotion;
+    ctx.isChatOpen = isChatOpen;
+    ctx.setExpression = setExpression;
+    ctx.setPose = setPose;
+    ctx.syncVideoClip = syncVideoClip;
+    ctx.snapVideoClip = snapVideoClip;
+    ctx.syncPetClip = syncPetClip;
+    ctx.clearActivityWatchdog = clearActivityWatchdog;
+    ctx.armActivityWatchdog = armActivityWatchdog;
+    ctx.showSpeech = showSpeech;
+    ctx.hideSpeech = hideSpeech;
+    ctx.sayDialogue = sayDialogue;
+    ctx.playAnimation = playAnimation;
+    ctx.cat2ActivityLog = cat2ActivityLog;
+    ctx.spawnHeartsAtCat = spawnHeartsAtCat;
+    ctx.detachPetListener = detachPetListener;
+    ctx.finishPet = finishPet;
+    ctx.getCatMouthCenter = getCatMouthCenter;
+    ctx.scheduleEyeUpdate = scheduleEyeUpdate;
+
+    Object.assign(ctx, Cat2Feed.create(ctx));
+    Object.assign(ctx, Cat2Sleep.create(ctx));
+    Object.assign(ctx, Cat2Activities.create(ctx));
   }
 
-  function updateFoodPref(foodType, liked) {
-    if (!foodPrefs[foodType] && foodPrefs[foodType] !== 0) return;
-    foodPrefs[foodType] = Math.max(-5, Math.min(5, foodPrefs[foodType] + (liked ? 1 : -1)));
-    saveFoodPrefs();
-  }
-
-  function updateFoodStars() {
-    foodChoice?.querySelectorAll('.food-opt').forEach((btn) => {
-      const type = btn.dataset.food;
-      const star = btn.querySelector('.food-star');
-      if (!star) return;
-      const show = (foodPrefs[type] || 0) >= 3;
-      star.classList.toggle('hidden', !show);
-    });
-  }
 
   function isReducedMotion() {
+
     return document.body.dataset.reducedMotion === 'true' ||
       window.meowSettings?.reducedMotion;
   }
@@ -810,7 +649,7 @@
     if (expected === 'idle' && !postMealPhase && !isEating && !isWalking && !isPettingNow()) {
       isBusy = false;
       animLock = false;
-      if (!awaitingFoodChoice && catEl.dataset.begging !== 'true') foodFlowActive = false;
+      if (!feedState.isFlowActive()) feedState.reset('recover');
     }
     Cat2Player.forceRecover?.();
     snapVideoClip({ force: true });
@@ -904,585 +743,6 @@
   function wiggle() { playAnimation('wiggle', 450); }
 
   /* ── Idle activities (cat's own business) ── */
-  function isAnimating() {
-    return isWalking || isEating || isSleeping || isPetting || animLock || isBusy ||
-      foodFlowActive || postMealPhase ||
-      catEl.dataset.begging === 'true' || awaitingFoodChoice ||
-      catEl.dataset.playing === 'butterfly' || catEl.dataset.playing === 'pet' ||
-      catEl.dataset.playing === 'meow' ||
-      catEl.dataset.playing === 'roll' ||
-      catEl.dataset.playing === 'groom' ||
-      catEl.dataset.playing === 'earpurr' ||
-      catEl.dataset.playing === 'grumpy' ||
-      catEl.dataset.playing === 'woolball' ||
-      catEl.dataset.playing === 'jump' ||
-      catEl.dataset.playing === 'scratch' ||
-      Cat2Player.isTransitioning?.();
-  }
-
-  function canDoActivity() {
-    return !isChatOpen() && !isAnimating() && !isSleeping &&
-      !breakAlertActive && !isFocusMode && !getSettings().focusMode;
-  }
-
-  function isPettingNow() {
-    return isPetting || catEl.dataset.playing === 'pet';
-  }
-
-  function stopActivity({ force = false } = {}) {
-    if (activityTimeout) clearTimeout(activityTimeout);
-    activityTimeout = null;
-    if (!force && isPettingNow()) return;
-    const playing = catEl.dataset.playing;
-    if (playing) cat2ActivityLog('interrupt', playing, { force });
-    if (catEl.dataset.playing === 'butterfly') {
-      finishButterflyChase();
-      return;
-    }
-    if (catEl.dataset.playing === 'meow') {
-      finishMeow();
-      return;
-    }
-    if (catEl.dataset.playing === 'roll') {
-      finishRoll();
-      return;
-    }
-    if (catEl.dataset.playing === 'groom') {
-      finishGroom();
-      return;
-    }
-    if (catEl.dataset.playing === 'earpurr') {
-      finishEarPurr();
-      return;
-    }
-    if (catEl.dataset.playing === 'grumpy') {
-      finishGrumpy();
-      return;
-    }
-    if (catEl.dataset.playing === 'woolball') {
-      finishWoolball();
-      return;
-    }
-    if (catEl.dataset.playing === 'jump') {
-      finishJump();
-      return;
-    }
-    if (catEl.dataset.playing === 'scratch') {
-      stopScratchActivity({ source: 'stopActivity' });
-      return;
-    }
-    if (catEl.dataset.playing === 'pet') {
-      finishPet();
-      return;
-    }
-    isBusy = false;
-    if (!isSleeping && !isEating) animLock = false;
-    catEl.dataset.activity = 'none';
-    activityProps?.classList.add('hidden');
-    if (isSleeping || isEating) return;
-    if (catEl.dataset.expression !== 'love') {
-      setExpression('happy');
-    }
-    syncVideoClip();
-  }
-
-  function startActivity(activity) {
-    if (CLIP_FLOW_MODE) return;
-    if (!canDoActivity()) return;
-    stopActivity();
-
-    isBusy = true;
-    animLock = true;
-    catEl.dataset.activity = activity.id;
-    setExpression(activity.expression);
-    hideSpeech();
-    Cat2Player.switchClip(activity.id, { crossfade: true });
-
-    const line = activity.lines[Math.floor(Math.random() * activity.lines.length)];
-    showSpeech(line, 4500);
-
-    const duration = activity.minMs + Math.random() * (activity.maxMs - activity.minMs);
-    activityTimeout = setTimeout(() => {
-      stopActivity();
-      if (!isChatOpen() && Math.random() < 0.35) {
-        showSpeech('*stretch* Back to loaf mode~', 2500);
-        playAnimation('stretch', 700);
-      }
-    }, duration);
-  }
-
-  function startRandomActivity() {
-    if (CLIP_FLOW_MODE) {
-      startButterflyChase();
-      return;
-    }
-    const act = IDLE_ACTIVITIES[Math.floor(Math.random() * IDLE_ACTIVITIES.length)];
-    startActivity(act);
-  }
-
-  function detachButterflyListener() {
-    if (!butterflyEndedListener) return;
-    window.removeEventListener('cat2:clip-ended', butterflyEndedListener);
-    butterflyEndedListener = null;
-  }
-
-  function finishButterflyChase() {
-    cat2ActivityLog('end', 'butterfly');
-    detachButterflyListener();
-    clearActivityWatchdog();
-    stopClipMovement();
-    catEl.classList.remove('walking-left', 'walking-right');
-    catEl.dataset.playing = '';
-    isBusy = false;
-    animLock = false;
-    setExpression('happy');
-    snapVideoClip();
-  }
-
-  async function startButterflyChase() {
-    if (!canDoActivity()) return false;
-    if (catEl.dataset.begging === 'true' || awaitingFoodChoice) return false;
-    if (isPettingNow()) return false;
-    if (Cat2Player.getCurrentKey() !== 'idle') return false;
-    if (catEl.dataset.playing === 'butterfly') return false;
-    if (Cat2Player.isTransitioning?.()) return false;
-
-    stopClipMovement();
-
-    butterflyPlacement = await window.meowAPI?.getWindowPlacement?.() ?? null;
-    const dir = pickHorizontalDirection(butterflyPlacement);
-    lastWalkDir = dir;
-
-    isBusy = true;
-    animLock = true;
-    catEl.dataset.playing = 'butterfly';
-    applyWalkFacing(dir);
-    setExpression('excited');
-    hideSpeech();
-    sayDialogue('butterfly', 3500);
-    snapVideoClip();
-
-    detachButterflyListener();
-    butterflyEndedListener = (ev) => {
-      if (ev.detail?.key !== 'butterfly') return;
-      finishButterflyChase();
-    };
-    window.addEventListener('cat2:clip-ended', butterflyEndedListener);
-    armActivityWatchdog('butterfly', finishButterflyChase);
-    cat2ActivityLog('start', 'butterfly');
-    return true;
-  }
-
-  function detachMeowListener() {
-    if (!meowEndedListener) return;
-    window.removeEventListener('cat2:clip-ended', meowEndedListener);
-    meowEndedListener = null;
-  }
-
-  function finishMeow() {
-    cat2ActivityLog('end', 'meow');
-    detachMeowListener();
-    clearActivityWatchdog();
-    catEl.dataset.playing = '';
-    isBusy = false;
-    animLock = false;
-    setExpression('happy', { skipSync: true });
-    snapVideoClip();
-  }
-
-  function startMeowActivity() {
-    if (!canDoActivity()) return false;
-    if (catEl.dataset.begging === 'true' || awaitingFoodChoice) return false;
-    if (isPettingNow()) return false;
-    if (Cat2Player.getCurrentKey() !== 'idle') return false;
-    if (catEl.dataset.playing === 'meow') return false;
-    if (Cat2Player.isTransitioning?.()) return false;
-
-    isBusy = true;
-    animLock = true;
-    catEl.dataset.playing = 'meow';
-    setExpression('happy', { skipSync: true });
-    hideSpeech();
-    snapVideoClip();
-
-    detachMeowListener();
-    meowEndedListener = (ev) => {
-      if (ev.detail?.key !== 'meow') return;
-      finishMeow();
-    };
-    window.addEventListener('cat2:clip-ended', meowEndedListener);
-    armActivityWatchdog('meow', () => {
-      if (postMealPhase === 'meow') completePostMealSequence();
-      else finishMeow();
-    });
-    cat2ActivityLog('start', 'meow', { postMeal: postMealPhase === 'meow' });
-    return true;
-  }
-
-  function detachRollListener() {
-    if (!rollEndedListener) return;
-    window.removeEventListener('cat2:clip-ended', rollEndedListener);
-    rollEndedListener = null;
-  }
-
-  function finishRoll() {
-    cat2ActivityLog('end', 'roll');
-    detachRollListener();
-    clearActivityWatchdog();
-    catEl.dataset.playing = '';
-    isBusy = false;
-    animLock = false;
-    setExpression('happy', { skipSync: true });
-    snapVideoClip();
-  }
-
-  function startRollActivity() {
-    if (!canDoActivity()) return false;
-    if (catEl.dataset.begging === 'true' || awaitingFoodChoice) return false;
-    if (isPettingNow()) return false;
-    if (Cat2Player.getCurrentKey() !== 'idle') return false;
-    if (catEl.dataset.playing === 'roll') return false;
-    if (Cat2Player.isTransitioning?.()) return false;
-
-    isBusy = true;
-    animLock = true;
-    catEl.dataset.playing = 'roll';
-    setExpression('love', { skipSync: true });
-    hideSpeech();
-    snapVideoClip();
-
-    detachRollListener();
-    rollEndedListener = (ev) => {
-      if (ev.detail?.key !== 'roll') return;
-      finishRoll();
-    };
-    window.addEventListener('cat2:clip-ended', rollEndedListener);
-    armActivityWatchdog('roll', finishRoll);
-    cat2ActivityLog('start', 'roll');
-    return true;
-  }
-
-  function detachGroomListener() {
-    if (!groomEndedListener) return;
-    window.removeEventListener('cat2:clip-ended', groomEndedListener);
-    groomEndedListener = null;
-  }
-
-  function finishGroom() {
-    cat2ActivityLog('end', 'groom');
-    detachGroomListener();
-    clearActivityWatchdog();
-    catEl.dataset.playing = '';
-    isBusy = false;
-    animLock = false;
-    setExpression('happy', { skipSync: true });
-    snapVideoClip();
-  }
-
-  function startGroomActivity() {
-    if (!canDoActivity()) return false;
-    if (catEl.dataset.begging === 'true' || awaitingFoodChoice) return false;
-    if (isPettingNow()) return false;
-    if (Cat2Player.getCurrentKey() !== 'idle') return false;
-    if (catEl.dataset.playing === 'groom') return false;
-    if (Cat2Player.isTransitioning?.()) return false;
-
-    isBusy = true;
-    animLock = true;
-    catEl.dataset.playing = 'groom';
-    setExpression('happy', { skipSync: true });
-    hideSpeech();
-    snapVideoClip();
-
-    detachGroomListener();
-    groomEndedListener = (ev) => {
-      if (ev.detail?.key !== 'groom') return;
-      finishGroom();
-    };
-    window.addEventListener('cat2:clip-ended', groomEndedListener);
-    armActivityWatchdog('groom', finishGroom);
-    cat2ActivityLog('start', 'groom');
-    return true;
-  }
-
-  function detachEarPurrListener() {
-    if (!earPurrEndedListener) return;
-    window.removeEventListener('cat2:clip-ended', earPurrEndedListener);
-    earPurrEndedListener = null;
-  }
-
-  function finishEarPurr() {
-    cat2ActivityLog('end', 'earpurr');
-    detachEarPurrListener();
-    clearActivityWatchdog();
-    catEl.dataset.playing = '';
-    isBusy = false;
-    animLock = false;
-    setExpression('happy', { skipSync: true });
-    snapVideoClip();
-  }
-
-  function startEarPurrActivity() {
-    if (!canDoActivity()) return false;
-    if (catEl.dataset.begging === 'true' || awaitingFoodChoice) return false;
-    if (isPettingNow()) return false;
-    if (Cat2Player.getCurrentKey() !== 'idle') return false;
-    if (catEl.dataset.playing === 'earpurr') return false;
-    if (Cat2Player.isTransitioning?.()) return false;
-
-    isBusy = true;
-    animLock = true;
-    catEl.dataset.playing = 'earpurr';
-    setExpression('love', { skipSync: true });
-    hideSpeech();
-    snapVideoClip();
-
-    detachEarPurrListener();
-    earPurrEndedListener = (ev) => {
-      if (ev.detail?.key !== 'earpurr') return;
-      finishEarPurr();
-    };
-    window.addEventListener('cat2:clip-ended', earPurrEndedListener);
-    armActivityWatchdog('earpurr', finishEarPurr);
-    cat2ActivityLog('start', 'earpurr');
-    return true;
-  }
-
-  function detachGrumpyListener() {
-    if (!grumpyEndedListener) return;
-    window.removeEventListener('cat2:clip-ended', grumpyEndedListener);
-    grumpyEndedListener = null;
-  }
-
-  function finishGrumpy() {
-    cat2ActivityLog('end', 'grumpy');
-    detachGrumpyListener();
-    clearActivityWatchdog();
-    catEl.dataset.playing = '';
-    isBusy = false;
-    animLock = false;
-    setExpression('happy', { skipSync: true });
-    snapVideoClip();
-    if (isCursorNearCat()) lastCursorNearAt = Date.now();
-  }
-
-  function startGrumpyActivity(opts = {}) {
-    if (!canDoActivity()) return false;
-    if (catEl.dataset.begging === 'true' || awaitingFoodChoice) return false;
-    if (isPettingNow()) return false;
-    if (Cat2Player.getCurrentKey() !== 'idle') return false;
-    if (catEl.dataset.playing === 'grumpy') return false;
-    if (Cat2Player.isTransitioning?.()) return false;
-
-    isBusy = true;
-    animLock = true;
-    catEl.dataset.playing = 'grumpy';
-    setExpression('sad', { skipSync: true });
-    sayDialogue('grumpy', 4500);
-    snapVideoClip();
-
-    detachGrumpyListener();
-    grumpyEndedListener = (ev) => {
-      if (ev.detail?.key !== 'grumpy') return;
-      finishGrumpy();
-    };
-    window.addEventListener('cat2:clip-ended', grumpyEndedListener);
-    armActivityWatchdog('grumpy', finishGrumpy);
-    cat2ActivityLog('start', 'grumpy', { trigger: opts.trigger || 'idle', ...opts });
-    return true;
-  }
-
-  function detachWoolballListener() {
-    if (!woolballEndedListener) return;
-    window.removeEventListener('cat2:clip-ended', woolballEndedListener);
-    woolballEndedListener = null;
-  }
-
-  function finishWoolball() {
-    cat2ActivityLog('end', 'woolball');
-    detachWoolballListener();
-    clearActivityWatchdog();
-    catEl.dataset.playing = '';
-    isBusy = false;
-    animLock = false;
-    setExpression('happy', { skipSync: true });
-    snapVideoClip();
-  }
-
-  function startWoolballActivity() {
-    if (!canDoActivity()) return false;
-    if (catEl.dataset.begging === 'true' || awaitingFoodChoice) return false;
-    if (isPettingNow()) return false;
-    if (Cat2Player.getCurrentKey() !== 'idle') return false;
-    if (catEl.dataset.playing === 'woolball') return false;
-    if (Cat2Player.isTransitioning?.()) return false;
-
-    isBusy = true;
-    animLock = true;
-    catEl.dataset.playing = 'woolball';
-    setExpression('excited', { skipSync: true });
-    sayDialogue('woolball', 5500);
-    snapVideoClip();
-
-    detachWoolballListener();
-    woolballEndedListener = (ev) => {
-      if (ev.detail?.key !== 'woolball') return;
-      finishWoolball();
-    };
-    window.addEventListener('cat2:clip-ended', woolballEndedListener);
-    armActivityWatchdog('woolball', finishWoolball);
-    cat2ActivityLog('start', 'woolball');
-    return true;
-  }
-
-  function detachJumpListener() {
-    if (!jumpEndedListener) return;
-    window.removeEventListener('cat2:clip-ended', jumpEndedListener);
-    jumpEndedListener = null;
-  }
-
-  function finishJump() {
-    cat2ActivityLog('end', 'jump');
-    detachJumpListener();
-    clearActivityWatchdog();
-    catEl.dataset.playing = '';
-    isBusy = false;
-    animLock = false;
-    setExpression('happy', { skipSync: true });
-    snapVideoClip();
-  }
-
-  function startJumpActivity() {
-    if (!canDoActivity()) return false;
-    if (catEl.dataset.begging === 'true' || awaitingFoodChoice) return false;
-    if (isPettingNow()) return false;
-    if (Cat2Player.getCurrentKey() !== 'idle') return false;
-    if (catEl.dataset.playing === 'jump') return false;
-    if (Cat2Player.isTransitioning?.()) return false;
-
-    isBusy = true;
-    animLock = true;
-    catEl.dataset.playing = 'jump';
-    setExpression('excited', { skipSync: true });
-    sayDialogue('jump', 5500);
-    snapVideoClip();
-
-    detachJumpListener();
-    jumpEndedListener = (ev) => {
-      if (ev.detail?.key !== 'jump') return;
-      finishJump();
-    };
-    window.addEventListener('cat2:clip-ended', jumpEndedListener);
-    armActivityWatchdog('jump', finishJump);
-    cat2ActivityLog('start', 'jump');
-    return true;
-  }
-
-  function showScratchStopPrompt() {
-    scratchStopPrompt?.classList.remove('hidden');
-    quickStopScratchBtn?.classList.remove('hidden');
-    catEl.classList.add('scratch-active');
-  }
-
-  function hideScratchStopPrompt() {
-    scratchStopPrompt?.classList.add('hidden');
-    quickStopScratchBtn?.classList.add('hidden');
-    catEl.classList.remove('scratch-active');
-  }
-
-  function detachScratchListener() {
-    if (!scratchEndedListener) return;
-    window.removeEventListener('cat2:clip-ended', scratchEndedListener);
-    scratchEndedListener = null;
-  }
-
-  function finishScratch() {
-    cat2ActivityLog('end', 'scratch');
-    detachScratchListener();
-    clearActivityWatchdog();
-    hideScratchStopPrompt();
-    catEl.dataset.playing = '';
-    isBusy = false;
-    animLock = false;
-    setExpression('happy', { skipSync: true });
-    snapVideoClip();
-  }
-
-  function stopScratchActivity({ source = 'unknown' } = {}) {
-    if (catEl.dataset.playing !== 'scratch') return false;
-    cat2ActivityLog('interrupt', 'scratch', { source });
-    finishScratch();
-    sayDialogue('scratchStop', 4500);
-    return true;
-  }
-
-  function startScratchActivity() {
-    if (!canDoActivity()) return false;
-    if (catEl.dataset.begging === 'true' || awaitingFoodChoice) return false;
-    if (isPettingNow()) return false;
-    if (Cat2Player.getCurrentKey() !== 'idle') return false;
-    if (catEl.dataset.playing === 'scratch') return false;
-    if (Cat2Player.isTransitioning?.()) return false;
-
-    isBusy = true;
-    animLock = true;
-    catEl.dataset.playing = 'scratch';
-    setExpression('excited', { skipSync: true });
-    sayDialogue('scratch', 5500);
-    showScratchStopPrompt();
-    snapVideoClip();
-
-    detachScratchListener();
-    scratchEndedListener = (ev) => {
-      if (ev.detail?.key !== 'scratch') return;
-      finishScratch();
-    };
-    window.addEventListener('cat2:clip-ended', scratchEndedListener);
-    armActivityWatchdog('scratch', finishScratch);
-    cat2ActivityLog('start', 'scratch');
-    return true;
-  }
-
-  function isCursorNearCat() {
-    const el = catFigure || catEl;
-    if (!el) return false;
-    const rect = el.getBoundingClientRect();
-    const pad = CURSOR_NEAR_PAD_PX;
-    return mouseX >= rect.left - pad &&
-      mouseX <= rect.right + pad &&
-      mouseY >= rect.top - pad &&
-      mouseY <= rect.bottom + pad;
-  }
-
-  function noteCursorProximity() {
-    if (isCursorNearCat()) lastCursorNearAt = Date.now();
-  }
-
-  function checkCursorAwayGrumpy() {
-    if (!CLIP_FLOW_MODE) return;
-    const settings = getSettings();
-    if (settings.focusMode || isFocusMode) return;
-    if (isChatOpen() || isSleeping || isEating || breakAlertActive ||
-        awaitingFoodChoice || foodFlowActive) return;
-    if (isAnimating()) return;
-    if (Cat2Player.getCurrentKey() !== 'idle') return;
-    if (catEl.dataset.begging === 'true') return;
-    if (catEl.dataset.playing === 'grumpy') return;
-    if (!canPickActivity('grumpy')) return;
-    if (Date.now() - lastCursorNearAt < CURSOR_AWAY_GRUMPY_MS) return;
-
-    const awayMs = Date.now() - lastCursorNearAt;
-    if (startGrumpyActivity({ trigger: 'cursor-away', awayMs })) {
-      lastCursorNearAt = Date.now();
-      recordActivityStart('grumpy');
-    }
-  }
-
-  function startCursorAwayWatch() {
-    if (cursorAwayCheckInterval) clearInterval(cursorAwayCheckInterval);
-    noteCursorProximity();
-    cursorAwayCheckInterval = setInterval(checkCursorAwayGrumpy, 2000);
-  }
 
   function detachPetListener() {
     if (!petEndedListener) return;
@@ -1533,101 +793,6 @@
         );
       }, i * 180);
     }
-  }
-
-  function clearPostMealHearts() {
-    if (postMealHeartInterval) {
-      clearInterval(postMealHeartInterval);
-      postMealHeartInterval = null;
-    }
-  }
-
-  function startPostMealPetPhase() {
-    cat2ActivityLog('start', 'pet', { trigger: 'post-meal' });
-    postMealPhase = 'pet';
-    isPetting = true;
-    isBusy = true;
-    animLock = true;
-    foodFlowActive = true;
-    catEl.dataset.playing = 'pet';
-    setExpression('love', { skipSync: true });
-    Cat2Player.cancelPending?.();
-    Cat2Player.preloadClip?.('pet');
-    syncPetClip();
-    spawnHeartsAtCat(4);
-    postMealHeartInterval = setInterval(() => spawnHeartsAtCat(2), 850);
-
-    detachPetListener();
-    const session = ++petSession;
-    petEndedListener = (ev) => {
-      if (ev.detail?.key !== 'pet') return;
-      if (session !== petSession) return;
-      if (postMealPhase !== 'pet') return;
-      clearPostMealHearts();
-      detachPetListener();
-      isPetting = false;
-      catEl.dataset.playing = '';
-      startPostMealMeowPhase();
-    };
-    window.addEventListener('cat2:clip-ended', petEndedListener);
-    armActivityWatchdog('pet', () => {
-      clearPostMealHearts();
-      detachPetListener();
-      isPetting = false;
-      catEl.dataset.playing = '';
-      startPostMealMeowPhase();
-    });
-  }
-
-  function startPostMealMeowPhase() {
-    if (postMealPhase === 'meow') return;
-    cat2ActivityLog('start', 'meow', { trigger: 'post-meal' });
-    postMealPhase = 'meow';
-    isBusy = true;
-    animLock = true;
-    foodFlowActive = true;
-    catEl.dataset.playing = 'meow';
-    setExpression('happy', { skipSync: true });
-    Cat2Player.cancelPending?.();
-    snapVideoClip();
-
-    detachMeowListener();
-    meowEndedListener = (ev) => {
-      if (ev.detail?.key !== 'meow') return;
-      if (postMealPhase !== 'meow') return;
-      completePostMealSequence();
-    };
-    window.addEventListener('cat2:clip-ended', meowEndedListener);
-    armActivityWatchdog('meow', completePostMealSequence);
-  }
-
-  function completePostMealSequence() {
-    if (!postMealPhase) return;
-    cat2ActivityLog('end', 'post-meal', { phase: postMealPhase });
-    clearActivityWatchdog();
-    clearPostMealHearts();
-    detachMeowListener();
-    postMealPhase = null;
-    catEl.dataset.playing = '';
-    isBusy = false;
-    animLock = false;
-    foodFlowActive = false;
-
-    const meta = postMealMeta;
-    postMealMeta = null;
-
-    startBowlCooldown();
-    postMealCooldownUntil = Date.now() + 90000;
-    recordActivityStart('meow');
-
-    if (meta) {
-      applyFoodMood(meta.liked ? 'good' : 'grumpy');
-      showSpeech(meta.reaction, 5000);
-    }
-
-    setExpression('happy', { skipSync: true });
-    snapVideoClip();
-    onFeedCycleComplete();
   }
 
   function petHead(e) {
@@ -1699,82 +864,6 @@
     });
   }
 
-  function begForFood() {
-    if (!canDoActivity()) return false;
-    if (!CLIP_FLOW_MODE && isBowlOnCooldown()) return false;
-    if (catEl.dataset.begging === 'true') {
-      scheduleFeedPromptRetry();
-      return false;
-    }
-    if (Cat2Player.getCurrentKey() !== 'idle') return false;
-
-    catEl.dataset.begging = 'true';
-    setExpression('sad');
-    snapVideoClip();
-    cat2ActivityLog('start', 'feed-beg');
-    if (!tryShowFeedPrompt()) scheduleFeedPromptRetry();
-    return true;
-  }
-
-  function hideFeedPrompt() {
-    if (awaitingFoodChoice) cat2ActivityLog('feed-prompt', 'hide');
-    awaitingFoodChoice = false;
-    foodChoice?.classList.add('hidden');
-    catEl.classList.remove('feed-prompt-open');
-    if (!isEating && !foodFlowActive) {
-      foodFlowActive = false;
-    }
-  }
-
-  function showFeedPrompt() {
-    if (tryShowFeedPrompt()) return;
-    scheduleFeedPromptRetry();
-  }
-
-  function acceptFood() {
-    if (isEating) return;
-    if (catEl.dataset.begging !== 'true' && !awaitingFoodChoice) return;
-    if (catEl.dataset.begging !== 'true') catEl.dataset.begging = 'true';
-    cat2ActivityLog('feed-choice', 'yes');
-    foodFlowActive = true;
-    animLock = true;
-    if (sleepTimeout) clearTimeout(sleepTimeout);
-    catEl.dataset.sleeping = '';
-    clearFeedPromptTimers();
-    hideFeedPrompt();
-    feedCat();
-  }
-
-  function declineFoodAndWalk() {
-    if (catEl.dataset.begging !== 'true' && !awaitingFoodChoice) return;
-    if (catEl.dataset.begging !== 'true') catEl.dataset.begging = 'true';
-    cat2ActivityLog('feed-choice', 'no');
-    foodFlowActive = true;
-    animLock = true;
-    clearFeedPromptTimers();
-    hideFeedPrompt();
-    catEl.dataset.begging = '';
-    walkThenSleep = true;
-    hideSpeech();
-    onFeedCycleComplete();
-    sayDialogue('walkDecline', 3500);
-
-    setTimeout(async () => {
-      if (!walkThenSleep) return;
-      hideSpeech();
-      await startWalk({ afterDecline: true });
-    }, 3200);
-  }
-
-  function cancelBegging({ syncClip = true } = {}) {
-    catEl.dataset.begging = '';
-    foodFlowActive = false;
-    clearFeedPromptTimers();
-    hideFeedPrompt();
-    hideSpeech();
-    if (syncClip) syncVideoClip();
-  }
-
   /* ── Window movement synced to walk / butterfly clips ── */
   let clipMoveRaf = null;
   let clipMovementStarted = false;
@@ -1783,497 +872,6 @@
   let lastWalkDir = 1;
   let walkPlacement = null;
   let butterflyPlacement = null;
-
-  function pickHorizontalDirection(placement) {
-    if (placement?.nearRight && !placement?.nearLeft) return -1;
-    if (placement?.nearLeft && !placement?.nearRight) return 1;
-    if (lastWalkDir) return -lastWalkDir;
-    return Math.random() < 0.5 ? -1 : 1;
-  }
-
-  function maxHorizontalDistance(dir, placement) {
-    const fallback = 260 + Math.random() * 120;
-    if (!placement?.workArea) return fallback;
-    const margin = 20;
-    const { x, width, workArea } = placement;
-    const room = dir > 0
-      ? workArea.x + workArea.width - (x + width) - margin
-      : x - workArea.x - margin;
-    if (room <= 40) return 0;
-    return Math.min(fallback, room);
-  }
-
-  function applyWalkFacing(dir) {
-    catEl.classList.remove('walking-left', 'walking-right');
-    catEl.classList.add(dir === -1 ? 'walking-left' : 'walking-right');
-  }
-
-  function stopClipMovement() {
-    clipMovementStarted = false;
-    clipMovementKey = null;
-    if (clipMoveRaf) {
-      cancelAnimationFrame(clipMoveRaf);
-      clipMoveRaf = null;
-    }
-  }
-
-  function stopWalkMovement() {
-    stopClipMovement();
-  }
-
-  function startSyncedClipMovement(clipKey, dir, opts = {}) {
-    if (clipMovementStarted) return;
-    const clip = Cat2Clips.get(clipKey);
-    const moveStart = opts.moveStart ?? clip.moveStart ?? 0;
-    const moveEnd = opts.moveEnd ?? clip.moveEnd ?? 1;
-    const distance = opts.totalDistance ?? (320 + Math.random() * 180);
-    if (distance <= 0) return;
-
-    clipMovementStarted = true;
-    clipMovementKey = clipKey;
-    let appliedPx = 0;
-
-    const tick = () => {
-      if (!clipMovementStarted || clipMovementKey !== clipKey) {
-        stopClipMovement();
-        return;
-      }
-
-      const playback = Cat2Player.getPlaybackState?.();
-      if (!playback || playback.key !== clipKey || playback.paused) {
-        clipMoveRaf = requestAnimationFrame(tick);
-        return;
-      }
-
-      const rawProgress = playback.currentTime / playback.duration;
-      if (rawProgress >= moveEnd) {
-        stopClipMovement();
-        return;
-      }
-      if (rawProgress < moveStart) {
-        clipMoveRaf = requestAnimationFrame(tick);
-        return;
-      }
-
-      const progress = Math.min(1, (rawProgress - moveStart) / (moveEnd - moveStart));
-      const targetPx = progress * distance * dir;
-      const rawDelta = targetPx - appliedPx;
-      if (Math.abs(rawDelta) >= 0.5) {
-        const step = Math.round(rawDelta);
-        appliedPx += step;
-        window.meowAPI?.dragWindow(step, 0);
-      }
-
-      clipMoveRaf = requestAnimationFrame(tick);
-    };
-
-    clipMoveRaf = requestAnimationFrame(tick);
-  }
-
-  function startWalkMovement(dir) {
-    startSyncedClipMovement('walk', dir, {
-      totalDistance: maxHorizontalDistance(dir, walkPlacement),
-    });
-  }
-
-  function startButterflyMovement(dir) {
-    const distance = maxHorizontalDistance(dir, butterflyPlacement);
-    startSyncedClipMovement('butterfly', dir, {
-      totalDistance: distance > 0 ? distance : 160,
-    });
-  }
-
-  function detachWalkEndedListener() {
-    if (!walkEndedListener) return;
-    window.removeEventListener('cat2:clip-ended', walkEndedListener);
-    walkEndedListener = null;
-  }
-
-  function stopWalk({ skipSync = false } = {}) {
-    if (walkTimeout) { clearTimeout(walkTimeout); walkTimeout = null; }
-    clearActivityWatchdog();
-    stopWalkMovement();
-    detachWalkEndedListener();
-    isWalking = false;
-    catEl.dataset.walking = '';
-    catEl.classList.remove('walking-left', 'walking-right');
-    if (!isSleeping && !isEating) animLock = false;
-    isBusy = false;
-    if (skipSync) return;
-    if (CLIP_FLOW_MODE) {
-      snapVideoClip();
-    } else {
-      syncVideoClip();
-    }
-  }
-
-  function finishWalk() {
-    cat2ActivityLog('end', 'walk', { walkThenSleep });
-    stopWalkMovement();
-    if (!isWalking) return;
-    stopWalk();
-    if (walkThenSleep) {
-      goToSleepAfterWalk();
-      return;
-    }
-    if (!isChatOpen()) sayDialogue('walkArrive', 2500);
-  }
-
-  function goToSleepAfterWalk() {
-    walkThenSleep = false;
-    stopWalkMovement();
-    catEl.classList.remove('walking-left', 'walking-right');
-    isBusy = false;
-    animLock = false;
-    goToSleepClip(undefined, { force: true });
-  }
-
-  function goToSleepClip(duration, { force = false } = {}) {
-    if (!CLIP_FLOW_MODE) {
-      goToSleep(duration);
-      return true;
-    }
-    if (isSleeping) return false;
-    if (foodFlowActive || isEating || catEl.dataset.begging === 'true') return false;
-    if (!force && Date.now() < postMealCooldownUntil) return false;
-    if (!force && !canPickActivity('sleep')) return false;
-    if (!force && !canDoActivity()) return false;
-    if (!force && Cat2Player.getCurrentKey() !== 'idle') return false;
-    if (!force && Cat2Player.isTransitioning?.()) return false;
-
-    stopActivity();
-    catEl.dataset.sleeping = 'true';
-    animLock = true;
-    isBusy = true;
-    hideSpeech();
-    setPose('sleep');
-    recordActivityStart('sleep');
-
-    const sleepMs = duration || Cat2Clips.getDurationMs('sleep');
-
-    if (sleepTimeout) clearTimeout(sleepTimeout);
-    sleepTimeout = setTimeout(() => {
-      wakeFromSleepFlow();
-    }, sleepMs);
-    cat2ActivityLog('start', 'sleep', { durationMs: sleepMs, force });
-    return true;
-  }
-
-  function wakeFromSleepFlow() {
-    if (!isSleeping) return;
-    cat2ActivityLog('end', 'sleep');
-    if (sleepTimeout) clearTimeout(sleepTimeout);
-    catEl.dataset.sleeping = '';
-    isBusy = false;
-    animLock = false;
-    foodFlowActive = false;
-    setPose('loaf', { skipSync: true });
-    setExpression('happy', { skipSync: true });
-    Cat2Player.cancelPending?.();
-    snapVideoClip();
-    sayDialogue('wake', 3000);
-  }
-
-  function onWalkClipVisible() {
-    if (!isWalking || Cat2Player.getCurrentKey() !== 'walk') return;
-    if (clipMovementStarted) return;
-
-    const dir = catEl.classList.contains('walking-left') ? -1 : 1;
-    startWalkMovement(dir);
-  }
-
-  function onButterflyClipVisible() {
-    if (catEl.dataset.playing !== 'butterfly') return;
-    if (Cat2Player.getCurrentKey() !== 'butterfly') return;
-    if (clipMovementStarted) return;
-
-    const dir = catEl.classList.contains('walking-left') ? -1 : 1;
-    startButterflyMovement(dir);
-  }
-
-  async function startWalk({ afterDecline = false } = {}) {
-    if (isWalking) return false;
-    if (!afterDecline) {
-      if (!canDoActivity()) return false;
-      if (Cat2Player.getCurrentKey() !== 'idle') return false;
-      if (Cat2Player.isTransitioning?.()) return false;
-    }
-
-    walkPlacement = await window.meowAPI?.getWindowPlacement?.() ?? null;
-    const dir = pickHorizontalDirection(walkPlacement);
-    lastWalkDir = dir;
-
-    stopWalk({ skipSync: afterDecline });
-
-    isWalking = true;
-    isBusy = true;
-    animLock = true;
-    foodFlowActive = false;
-    catEl.dataset.walking = 'true';
-    applyWalkFacing(dir);
-
-    if (!afterDecline) sayDialogue('walkPatrol', 3500);
-    setExpression('happy');
-    if (afterDecline) snapVideoClip();
-    else syncVideoClip();
-
-    detachWalkEndedListener();
-    walkEndedListener = (ev) => {
-      if (ev.detail?.key !== 'walk') return;
-      stopWalkMovement();
-      if (walkTimeout) clearTimeout(walkTimeout);
-      walkTimeout = null;
-      finishWalk();
-    };
-    window.addEventListener('cat2:clip-ended', walkEndedListener);
-    armActivityWatchdog('walk', () => {
-      stopWalkMovement();
-      if (walkTimeout) clearTimeout(walkTimeout);
-      walkTimeout = null;
-      finishWalk();
-    });
-    cat2ActivityLog('start', 'walk', { afterDecline, dir });
-    return true;
-  }
-  function resetBowlPosition() {
-    foodBowl.style.position = '';
-    foodBowl.style.left = '';
-    foodBowl.style.top = '';
-    foodBowl.style.transform = '';
-    foodBowl.classList.remove('dragging', 'near-cat');
-  }
-
-  function getBowlCenter() {
-    const rect = foodBowl.getBoundingClientRect();
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-  }
-
-  function getCatMouthCenter() {
-    const layer = document.querySelector('.cat2-video-layer') || catFigure;
-    const rect = layer.getBoundingClientRect();
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height * 0.72 };
-  }
-
-  function checkBowlNearCat() {
-    const bowl = getBowlCenter();
-    const mouth = getCatMouthCenter();
-    const dist = Math.hypot(bowl.x - mouth.x, bowl.y - mouth.y);
-    if (dist < 45) {
-      foodBowl.classList.add('near-cat');
-      return true;
-    }
-    foodBowl.classList.remove('near-cat');
-    return false;
-  }
-
-  /* ── Food prompt (Yes / No) ── */
-  function showFoodChoice() {
-    if (CLIP_FLOW_MODE) {
-      showFeedPrompt();
-      return;
-    }
-    if (isBowlOnCooldown() || isSleeping || isEating || isChatOpen()) return;
-    awaitingFoodChoice = true;
-    if (!CLIP_FLOW_MODE) hideSpeech();
-    else showSpeech(FOOD_BEG_DIALOG, 0);
-    updateFoodStars();
-    foodChoice?.classList.remove('hidden');
-    setExpression('excited');
-
-    if (foodChoiceTimeout) clearTimeout(foodChoiceTimeout);
-    foodChoiceTimeout = setTimeout(() => {
-      foodChoiceTimeout = null;
-      if (awaitingFoodChoice) hideFoodChoice();
-    }, 14000);
-  }
-
-  function hideFoodChoice() {
-    if (CLIP_FLOW_MODE) {
-      hideFeedPrompt();
-      return;
-    }
-    awaitingFoodChoice = false;
-    if (foodChoiceTimeout) clearTimeout(foodChoiceTimeout);
-    foodChoiceTimeout = null;
-    foodChoice?.classList.add('hidden');
-    if (CLIP_FLOW_MODE) {
-      cancelBegging();
-    } else {
-      catEl.dataset.begging = '';
-      syncVideoClip();
-    }
-  }
-
-  function applyFoodMood(mood) {
-    foodMood = mood;
-    catEl.dataset.mood = mood;
-    if (foodMoodTimeout) clearTimeout(foodMoodTimeout);
-    foodMoodTimeout = setTimeout(() => {
-      foodMood = null;
-      catEl.dataset.mood = '';
-      if (!isSleeping && !isEating) setExpression('happy');
-    }, 5 * 60 * 1000);
-  }
-
-  function feedCat(foodType) {
-    if (isSleeping || isEating) return;
-    if (CLIP_FLOW_MODE && catEl.dataset.begging !== 'true' && !foodType) return;
-    if (!CLIP_FLOW_MODE && isBowlOnCooldown()) return;
-
-    foodFlowActive = true;
-    animLock = true;
-    cat2ActivityLog('start', 'eat', { foodType: foodType || 'scheduled' });
-    if (sleepTimeout) clearTimeout(sleepTimeout);
-    catEl.dataset.sleeping = '';
-    Cat2Player.cancelPending?.();
-
-    let eatEndedListener = null;
-
-    const finishEating = () => {
-      if (!isEating) return;
-      cat2ActivityLog('end', 'eat');
-      if (eatEndedListener) {
-        window.removeEventListener('cat2:clip-ended', eatEndedListener);
-        eatEndedListener = null;
-      }
-      if (eatTimeout) clearTimeout(eatTimeout);
-      eatTimeout = null;
-      isEating = false;
-      catEl.dataset.begging = '';
-      catEl.dataset.sleeping = '';
-      nomFloat?.classList.remove('show');
-      resetBowlPosition();
-      setPose('loaf', { skipSync: true });
-
-      const type = foodType || (Math.random() < 0.5 ? 'plain' : 'fishy');
-      const liked = Math.random() < getLikeChance(type);
-      updateFoodPref(type, liked);
-      updateFoodStars();
-
-      const lines = FOOD_REACTIONS[type][liked ? 'like' : 'dislike'];
-      const reaction = lines[Math.floor(Math.random() * lines.length)];
-      postMealMeta = { type, liked, reaction };
-
-      if (CLIP_FLOW_MODE) {
-        hideSpeech();
-        startPostMealPetPhase();
-        return;
-      }
-
-      stopEating();
-      applyFoodMood(liked ? 'good' : 'grumpy');
-      if (!CLIP_FLOW_MODE) {
-        if (liked) {
-          setExpression('excited');
-          playAnimation('bounce', 550);
-          setTimeout(() => playAnimation('wiggle', 450), 600);
-        } else {
-          setExpression('sad');
-          playAnimation('shake', 400);
-          setTimeout(() => playAnimation('shakeHead', 400), 500);
-        }
-      }
-      showSpeech(reaction, 5000);
-      onFeedCycleComplete();
-    };
-
-    const armEatTimeout = () => {
-      if (eatTimeout) clearTimeout(eatTimeout);
-      const eatMs = Cat2Clips.getDurationMs('eat');
-      eatTimeout = setTimeout(finishEating, eatMs + 900);
-    };
-
-    eatEndedListener = (ev) => {
-      if (ev.detail?.key !== 'eat') return;
-      finishEating();
-    };
-    window.addEventListener('cat2:clip-ended', eatEndedListener);
-    armEatTimeout();
-
-    const onEatVisible = (ev) => {
-      if (ev.detail?.key !== 'eat' || !isEating) return;
-      window.removeEventListener('cat2:clip-visible', onEatVisible);
-      armEatTimeout();
-    };
-    window.addEventListener('cat2:clip-visible', onEatVisible);
-
-    if (CLIP_FLOW_MODE) {
-      catEl.dataset.begging = '';
-      hideFeedPrompt();
-    } else {
-      catEl.dataset.begging = '';
-      hideFoodChoice();
-    }
-    resetBowlPosition();
-    hideSpeech();
-    setPose('eat');
-    setExpression('happy', { skipSync: true });
-    stopActivity();
-    sayDialogue('eatStart', 2800);
-
-    if (CLIP_FLOW_MODE && Cat2Player.getCurrentKey() === 'eat') {
-      armEatTimeout();
-    }
-  }
-
-  function stopEating() {
-    if (!isEating) return;
-    if (eatTimeout) clearTimeout(eatTimeout);
-    isEating = false;
-    animLock = false;
-    foodFlowActive = false;
-    catEl.dataset.begging = '';
-    catEl.dataset.sleeping = '';
-    nomFloat?.classList.remove('show');
-    resetBowlPosition();
-    setPose('loaf');
-    if (CLIP_FLOW_MODE) {
-      setExpression('happy', { skipSync: true });
-      snapVideoClip();
-    } else {
-      setExpression('happy');
-    }
-  }
-
-  function wakeUp() {
-    if (!isSleeping) return false;
-    cat2ActivityLog('interrupt', 'sleep', { trigger: 'wakeUp' });
-    if (CLIP_FLOW_MODE) {
-      wakeFromSleepFlow();
-    } else {
-      if (sleepTimeout) clearTimeout(sleepTimeout);
-      catEl.dataset.sleeping = '';
-      animLock = false;
-      setPose('loaf');
-      setExpression('happy');
-      playAnimation('yawn', 900);
-      sayDialogue('wake', 3000);
-    }
-    scheduleEyeUpdate();
-    return true;
-  }
-
-  function goToSleep(duration = 20000) {
-    if (CLIP_FLOW_MODE) return;
-    if (isSleeping || isEating || animLock || isChatOpen()) return;
-    stopActivity();
-    animLock = true;
-    setPose('sleep');
-    hideSpeech();
-    sleepTimeout = setTimeout(() => {
-      setPose('loaf');
-      setExpression('happy');
-      animLock = false;
-      showSpeech('*stretch* Good nap~', 2500);
-      playAnimation('stretch', 800);
-      scheduleEyeUpdate();
-    }, duration);
-  }
-
-  function goToEat() {
-    if (isSleeping || isEating || animLock || isChatOpen() || isBowlOnCooldown()) return;
-    begForFood();
-  }
 
   function blink() {
     if (isSleeping || isEating || isBusy) return;
@@ -2292,7 +890,7 @@
 
   function showSpeech(text, duration = 4000) {
     if (isSleeping) return;
-    if (CLIP_FLOW_MODE && awaitingFoodChoice) return;
+    if (CLIP_FLOW_MODE && feedState.isAwaitingChoice()) return;
     speechText.textContent = text;
     speechBubble.classList.remove('hidden');
     if (speechTimeout) clearTimeout(speechTimeout);
@@ -2328,96 +926,8 @@
     contextMenu.classList.add('hidden');
   }
 
-  function isMoodActivity(type) {
-    return type === 'sleep' || type === 'grumpy';
-  }
-
-  function recordActivityStart(type) {
-    if (!type) return;
-    lastRandomActivity = type;
-    lastActivityStartedAt[type] = Date.now();
-    recentActivityHistory.push(type);
-    while (recentActivityHistory.length > ACTIVITY_HISTORY_SIZE) {
-      recentActivityHistory.shift();
-    }
-  }
-
-  function wasRecentActivity(type, lookback = 1) {
-    if (!type) return false;
-    return recentActivityHistory.slice(-lookback).includes(type);
-  }
-
-  function canPickActivity(type) {
-    if (!type) return false;
-    if (type === 'sleep' && Date.now() < postMealCooldownUntil) return false;
-    if (type === lastRandomActivity) return false;
-
-    if (isMoodActivity(type)) {
-      const lastAt = lastActivityStartedAt[type];
-      if (lastAt && Date.now() - lastAt < MOOD_ACTIVITY_COOLDOWN_MS) return false;
-      if (wasRecentActivity(type, MOOD_ACTIVITY_RECENT_LOOKBACK)) return false;
-      const paired = type === 'sleep' ? 'grumpy' : 'sleep';
-      if (lastRandomActivity === paired) return false;
-      if (wasRecentActivity(paired, 2)) return false;
-      return true;
-    }
-
-    return true;
-  }
-
-  function shuffledActivityOptions() {
-    let options = IDLE_ACTIVITY_OPTIONS.filter((o) => canPickActivity(o));
-    if (!options.length) {
-      options = PLAYFUL_ACTIVITY_OPTIONS.filter((o) => o !== lastRandomActivity);
-    }
-    if (!options.length) {
-      options = [...PLAYFUL_ACTIVITY_OPTIONS];
-    }
-    for (let i = options.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [options[i], options[j]] = [options[j], options[i]];
-    }
-    return options;
-  }
-
   function isChatOpen() {
     return !document.getElementById('chat-panel')?.classList.contains('hidden');
-  }
-
-  async function pickRandomClipActivity() {
-    if (!canDoActivity()) return false;
-    if (foodFlowActive || isEating) return false;
-    if (Cat2Player.getCurrentKey() !== 'idle') return false;
-    if (catEl.dataset.begging === 'true' || awaitingFoodChoice) return false;
-    if (Cat2Player.isTransitioning?.()) return false;
-
-    const options = shuffledActivityOptions();
-    cat2ActivityLog('idle-tick', 'pick-random', { options });
-
-    for (const choice of options) {
-      let started = false;
-      if (choice === 'butterfly') started = await startButterflyChase();
-      else if (choice === 'walk') started = await startWalk();
-      else if (choice === 'meow') started = startMeowActivity();
-      else if (choice === 'roll') started = startRollActivity();
-      else if (choice === 'groom') started = startGroomActivity();
-      else if (choice === 'earpurr') started = startEarPurrActivity();
-      else if (choice === 'grumpy') started = canPickActivity('grumpy') && startGrumpyActivity();
-      else if (choice === 'woolball') started = startWoolballActivity();
-      else if (choice === 'jump') started = startJumpActivity();
-      else if (choice === 'scratch') started = startScratchActivity();
-      else if (choice === 'sleep') started = canPickActivity('sleep') && goToSleepClip();
-      else started = false;
-
-      if (started) {
-        recordActivityStart(choice);
-        cat2ActivityLog('idle-pick', choice, { started: true });
-        return true;
-      }
-      cat2ActivityLog('idle-pick', choice, { started: false });
-    }
-    cat2ActivityLog('idle-pick', 'none', { reason: 'all-skipped' });
-    return false;
   }
 
   function startIdleBehaviorLoop() {
@@ -2426,12 +936,12 @@
     const tick = () => {
       const settings = getSettings();
       if (settings.focusMode || isFocusMode) return;
-      if (isChatOpen() || isSleeping || isEating || breakAlertActive || awaitingFoodChoice || foodFlowActive) return;
+      if (isChatOpen() || isSleeping || isEating || breakAlertActive || feedState.isAwaitingChoice() || feedState.isFlowActive()) return;
 
       if (CLIP_FLOW_MODE) {
         if (isAnimating()) return;
         if (Cat2Player.getCurrentKey() !== 'idle') return;
-        if (catEl.dataset.begging === 'true' || awaitingFoodChoice || foodFlowActive) return;
+        if (catEl.dataset.begging === 'true' || feedState.isAwaitingChoice() || feedState.isFlowActive()) return;
         const level = settings.chattyLevel || 'normal';
         if (foodMood && Math.random() < (level === 'quiet' ? 0.12 : 0.22)) {
           sayDialogue(foodMood === 'good' ? 'goodMood' : 'grumpyMood', 3500);
@@ -2611,6 +1121,23 @@
     playAnimation('yawn', 700);
   }
 
+  wireCat2Modules();
+  ({
+    loadBowlCooldown, clearFeedSchedule, scheduleFeedRequest, updateFeedIntervalDuration,
+    resumeFeedSchedule, onFeedCycleComplete,
+    begForFood, hideFeedPrompt, showFeedPrompt, acceptFood, declineFoodAndWalk,
+    cancelBegging, showFoodChoice, hideFoodChoice, feedCat, stopEating, goToEat,
+    refreshFeedPromptAfterChat, tryShowFeedPrompt, ensureFeedPromptVisible,
+    loadFoodPrefs, updateFoodStars, isBowlOnCooldown, resetBowlPosition,
+    checkBowlNearCat, completePostMealSequence,
+    stopWalk, startWalk, goToSleepClip, wakeUp, goToSleep,
+    onWalkClipVisible, onButterflyClipVisible, stopClipMovement,
+    isAnimating, canDoActivity, isPettingNow, stopActivity, startRandomActivity,
+    startButterflyChase, finishButterflyChase, stopScratchActivity,
+    pickRandomClipActivity, startCursorAwayWatch, noteCursorProximity,
+    recordActivityStart, canPickActivity,
+  } = ctx);
+
   /* ── Event listeners ── */
   window.addEventListener('mousemove', (e) => {
     mouseX = e.clientX;
@@ -2687,11 +1214,11 @@
       showSpeech(pickDialogue('feedInterrupt').text, 2000);
       return;
     }
-    if (!awaitingFoodChoice && catEl.dataset.begging !== 'true') {
+    if (!feedState.isAwaitingChoice() && catEl.dataset.begging !== 'true') {
       stopWalk();
       stopActivity();
     }
-    if (CLIP_FLOW_MODE && canDoActivity() && !awaitingFoodChoice && catEl.dataset.begging !== 'true') {
+    if (CLIP_FLOW_MODE && canDoActivity() && !feedState.isAwaitingChoice() && catEl.dataset.begging !== 'true') {
       sayDialogue('click', 2500);
     } else if (!CLIP_FLOW_MODE) {
       bounce();
@@ -2789,32 +1316,31 @@
     const settings = e.detail?.settings;
     if (!settings) return;
     const key = e.detail?.key;
-    if (typeof settings.focusMode === 'boolean') {
+    if (key === 'focusMode' && typeof settings.focusMode === 'boolean') {
       setFocusMode(settings.focusMode);
       if (settings.focusMode) {
         clearFeedSchedule();
-      } else if (!awaitingFoodChoice && catEl.dataset.begging !== 'true') {
-        scheduleFeedRequest(getFeedIntervalMs());
+      } else {
+        resumeFeedSchedule();
       }
     }
-    if (typeof settings.reducedMotion === 'boolean') {
+    if (key === 'reducedMotion' && typeof settings.reducedMotion === 'boolean') {
       Cat2Player.setReducedMotion(settings.reducedMotion);
       if (!settings.reducedMotion && catEl.dataset.begging === 'true') {
         Cat2Player.forceRecover?.();
-        if (!awaitingFoodChoice) tryShowFeedPrompt();
+        if (!feedState.isAwaitingChoice()) tryShowFeedPrompt();
         else {
           foodChoice?.classList.remove('hidden');
           catEl.classList.add('feed-prompt-open');
         }
       }
     }
-    if (typeof settings.catSounds === 'boolean') {
+    if (key === 'catSounds' && typeof settings.catSounds === 'boolean') {
       Cat2Player.setSoundsEnabled?.(settings.catSounds);
     }
-    if (key === 'chattyLevel' || key === 'all') restartIdleLoop();
-    if ((key === 'feedIntervalMinutes' || key === 'all') &&
-        !awaitingFoodChoice && catEl.dataset.begging !== 'true') {
-      scheduleFeedRequest(getFeedIntervalMs());
+    if (key === 'chattyLevel') restartIdleLoop();
+    if (key === 'feedIntervalMinutes') {
+      updateFeedIntervalDuration(getFeedIntervalMs());
     }
   });
 
@@ -2878,7 +1404,7 @@
     Cat2Player.switchClip('idle', { crossfade: false, force: true });
     scheduleFeedRequest(getFeedIntervalMs());
     setTimeout(() => {
-      if (!catEl.dataset.begging && !awaitingFoodChoice && canDoActivity()) {
+      if (!catEl.dataset.begging && !feedState.isAwaitingChoice() && canDoActivity()) {
         sayDialogue('greetings', 4500);
       }
     }, 800);
@@ -2908,8 +1434,8 @@
     startButterflyChase, petHead, goToSleepClip, pickRandomClipActivity,
     showFoodChoice, hideFoodChoice, setFocusMode, snoozeBreak,
     isPetting: isPettingNow,
-    isAwaitingFoodChoice: () => awaitingFoodChoice,
-    isFeedBegging: () => catEl.dataset.begging === 'true',
+    isAwaitingFoodChoice: () => feedState.isAwaitingChoice(),
+    isFeedBegging: () => feedState.isBegging(),
     refreshFeedPromptAfterChat,
     stopScratch: () => stopScratchActivity({ source: 'api' }),
     cat2ActivityLog,
