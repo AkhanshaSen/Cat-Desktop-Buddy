@@ -98,6 +98,59 @@ AI Meow is built for **Windows as a first-class platform**, not macOS-only:
 
 Install Node.js LTS on Windows, then use `Start Meow.bat` or `npm start` from PowerShell / Command Prompt.
 
+## Share with friends (no Node.js required)
+
+You can build a **standalone installer** so friends double-click an `.exe` (Windows) or `.dmg` (macOS) — no Node.js needed.
+
+### Build on your machine
+
+```bash
+npm install
+npm run dist          # build for your current OS
+npm run dist:win      # Windows .exe (run on Windows, or CI)
+npm run dist:mac      # macOS .dmg (run on macOS)
+```
+
+Output goes to the `dist/` folder.
+
+### Mac → Windows (or Mac → Mac)
+
+**You cannot send a Mac build to a Windows friend.** Installers are OS-specific:
+
+| You build on | Friend needs | Send them |
+|--------------|--------------|-----------|
+| **Mac** | Mac | `AI Meow-x.x.x.dmg` from `npm run dist:mac` |
+| **Mac** | Windows | ❌ Mac `.dmg` / `.app` will **not** run on Windows |
+| **Windows** | Windows | `AI Meow Setup x.x.x.exe` from `npm run dist:win` |
+| **Windows** | Mac | ❌ Windows `.exe` will **not** run on Mac |
+
+**Yes — you can build on your device and send the file** (Google Drive, Dropbox, etc.), as long as it matches their OS. Your friend double-clicks the installer; no Node.js required.
+
+**If you only have a Mac but friends use Windows**, you need one of:
+- A Windows PC (or VM) to run `npm run dist:win`
+- **GitHub Actions** to build Windows automatically on every release (free for public repos)
+
+### First launch — pick your buddy
+
+The packaged app shows a **chooser screen**:
+
+| Option | What you get |
+|--------|----------------|
+| **AI Meow** | Classic SVG cat (Cat 1) |
+| **AI Meow 2** | Video clip cat (Cat 2) |
+
+The picker appears **every time** the app starts so you can switch cats whenever you like.
+
+### Dev vs packaged
+
+| | Developers (`npm start`) | Friends (installer) |
+|---|--------------------------|---------------------|
+| Cat 1 | `npm start` | Launcher → AI Meow |
+| Cat 2 | `npm run start:cat2` | Launcher → AI Meow 2 |
+| Launcher preview | `npm run start:launcher` | Shown automatically |
+
+> **Note:** Unsigned builds may show “Unknown publisher” (Windows) or Gatekeeper warnings (macOS). Friends can still run via “Run anyway” / right-click → Open.
+
 ## How to hide or quit
 
 | Action | Result |
@@ -140,8 +193,10 @@ Install Node.js LTS on Windows, then use `Start Meow.bat` or `npm start` from Po
 Cat-Desktop-Buddy/
 ├── Start Meow.bat       # Windows one-click launch
 ├── Start Meow.command   # macOS one-click launch
+├── launcher-main.js     # Packaged app: cat picker entry
 ├── main.js
 ├── preload.js
+├── preload-launcher.js
 ├── scripts/
 │   ├── start.js
 │   └── stop.js

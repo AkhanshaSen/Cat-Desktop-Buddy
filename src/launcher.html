@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Meow</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      html, body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #fdf6f9;
+        font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+        user-select: none;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .launcher {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        padding: 44px 24px 20px;
+      }
+
+      .drag-region {
+        -webkit-app-region: drag;
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 52px;
+      }
+
+      .header {
+        text-align: center;
+        margin-bottom: 22px;
+        position: relative;
+        z-index: 1;
+      }
+
+      .logo-ring {
+        width: 52px;
+        height: 52px;
+        margin: 0 auto 12px;
+        border-radius: 16px;
+        background: linear-gradient(135deg, #ffb3c6 0%, #ff8fab 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 8px 20px rgba(255, 100, 150, 0.28);
+      }
+
+      .logo-ring svg {
+        width: 28px;
+        height: 28px;
+      }
+
+      h1 {
+        font-size: 22px;
+        font-weight: 700;
+        color: #5c2238;
+        letter-spacing: -0.04em;
+        margin-bottom: 6px;
+      }
+
+      .subtitle {
+        font-size: 12px;
+        color: #8f5a6e;
+        line-height: 1.55;
+        max-width: 300px;
+        margin: 0 auto;
+      }
+
+      .choices {
+        display: flex;
+        gap: 14px;
+        flex: 1;
+        align-items: stretch;
+        position: relative;
+        z-index: 1;
+      }
+
+      .choice {
+        -webkit-app-region: no-drag;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        border: 1px solid rgba(255, 150, 180, 0.35);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.72);
+        padding: 18px 12px 14px;
+        cursor: pointer;
+        text-align: center;
+        transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+        box-shadow: 0 2px 8px rgba(140, 60, 90, 0.06);
+      }
+
+      .choice:hover {
+        transform: translateY(-2px);
+        border-color: rgba(255, 120, 160, 0.65);
+        box-shadow: 0 12px 28px rgba(255, 100, 150, 0.16);
+      }
+
+      .choice:active { transform: scale(0.98); }
+
+      .icon-badge {
+        width: 56px;
+        height: 56px;
+        border-radius: 18px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 12px;
+        flex-shrink: 0;
+      }
+
+      .icon-badge svg {
+        width: 32px;
+        height: 32px;
+      }
+
+      .choice.cat1 .icon-badge {
+        background: linear-gradient(145deg, #fff4e6 0%, #ffe0b8 100%);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 4px 12px rgba(255, 170, 80, 0.18);
+      }
+
+      .choice.cat2 .icon-badge {
+        background: linear-gradient(145deg, #f0ecff 0%, #ddd4ff 100%);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 4px 12px rgba(130, 100, 220, 0.18);
+      }
+
+      .choice-title {
+        font-size: 13px;
+        font-weight: 700;
+        color: #5c2238;
+        margin-bottom: 6px;
+        letter-spacing: -0.02em;
+      }
+
+      .choice-desc {
+        font-size: 10px;
+        line-height: 1.45;
+        color: #9a6878;
+      }
+
+      .choice-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        justify-content: center;
+        margin-top: 10px;
+      }
+
+      .tag {
+        font-size: 8px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        color: #a05068;
+        background: rgba(255, 220, 232, 0.55);
+        border: 1px solid rgba(255, 170, 195, 0.35);
+        padding: 2px 6px;
+        border-radius: 6px;
+      }
+
+      .footer {
+        -webkit-app-region: no-drag;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: 18px;
+        padding-top: 14px;
+        border-top: 1px solid rgba(255, 180, 200, 0.3);
+        position: relative;
+        z-index: 1;
+      }
+
+      .author {
+        font-size: 11px;
+        color: #9a6878;
+        font-weight: 500;
+      }
+
+      .author strong {
+        color: #c04868;
+        font-weight: 700;
+      }
+
+      .quit-btn {
+        font-size: 11px;
+        font-weight: 600;
+        color: #a07080;
+        background: rgba(255, 255, 255, 0.6);
+        border: 1px solid rgba(255, 170, 195, 0.4);
+        cursor: pointer;
+        padding: 6px 14px;
+        border-radius: 10px;
+        transition: background 0.15s, color 0.15s, border-color 0.15s;
+      }
+
+      .quit-btn:hover {
+        color: #5c2238;
+        background: #fff;
+        border-color: rgba(255, 120, 160, 0.55);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="drag-region" aria-hidden="true"></div>
+
+    <div class="launcher">
+      <header class="header">
+        <div class="logo-ring" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M6 10C6 7.5 7.8 5.5 10 5.5C11.2 5.5 12.3 6 13 6.9C13.7 6 14.8 5.5 16 5.5C18.2 5.5 20 7.5 20 10C20 14 16 17 13 17.5C10 17 6 14 6 10Z" fill="white" fill-opacity="0.95"/>
+            <circle cx="9.5" cy="10" r="1.1" fill="#ff6b95"/>
+            <circle cx="16.5" cy="10" r="1.1" fill="#ff6b95"/>
+            <path d="M11 12.5C11.8 13.2 13.2 13.2 14 12.5" stroke="#ff6b95" stroke-width="0.9" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <h1>Pick your Meow</h1>
+        <p class="subtitle">Choose your desktop buddy — classic animated cat or the new video edition.</p>
+      </header>
+
+      <div class="choices">
+        <button type="button" class="choice cat1" data-variant="cat1" aria-label="AI Meow classic">
+          <div class="icon-badge" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M8 14L6 8L10 11L16 6L22 11L26 8L24 14" stroke="#e89540" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <ellipse cx="16" cy="18" rx="9" ry="8" fill="#f3dfc6" stroke="#e2b080" stroke-width="1.2"/>
+              <ellipse cx="12.5" cy="17" rx="1.3" ry="1.6" fill="#4a3020"/>
+              <ellipse cx="19.5" cy="17" rx="1.3" ry="1.6" fill="#4a3020"/>
+              <path d="M14 20.5C15 21.5 17 21.5 18 20.5" stroke="#c07060" stroke-width="1" stroke-linecap="round"/>
+              <path d="M10 21L8 23M22 21L24 23" stroke="#e2b080" stroke-width="1.2" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="choice-title">AI Meow</div>
+          <div class="choice-desc">Classic companion with SVG animations</div>
+          <div class="choice-tags">
+            <span class="tag">Chat</span>
+            <span class="tag">Feed</span>
+            <span class="tag">Customize</span>
+          </div>
+        </button>
+
+        <button type="button" class="choice cat2" data-variant="cat2" aria-label="AI Meow 2 video">
+          <div class="icon-badge" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="5" y="9" width="22" height="16" rx="3" fill="#7c6cf0" fill-opacity="0.15" stroke="#7c6cf0" stroke-width="1.3"/>
+              <path d="M14 13L20 16.5L14 20V13Z" fill="#7c6cf0"/>
+              <circle cx="24" cy="11" r="4" fill="#f3dfc6" stroke="#c9a070" stroke-width="1"/>
+              <path d="M22.5 9.5L23.5 8L24.5 9.5L23.5 11Z" fill="#c9a070"/>
+              <circle cx="23.2" cy="10.8" r="0.6" fill="#4a3020"/>
+              <circle cx="24.8" cy="10.8" r="0.6" fill="#4a3020"/>
+            </svg>
+          </div>
+          <div class="choice-title">AI Meow 2</div>
+          <div class="choice-desc">Video clips, hunger meter &amp; activities</div>
+          <div class="choice-tags">
+            <span class="tag">HD clips</span>
+            <span class="tag">Idle life</span>
+            <span class="tag">Feed me</span>
+          </div>
+        </button>
+      </div>
+
+      <footer class="footer">
+        <p class="author">by <strong>Akhansha_Sen</strong></p>
+        <button type="button" class="quit-btn" id="quit">Quit</button>
+      </footer>
+    </div>
+
+    <script>
+      document.querySelectorAll('.choice').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          window.launcherAPI.pickBuddy(btn.dataset.variant);
+        });
+      });
+      document.getElementById('quit').addEventListener('click', () => {
+        window.launcherAPI.quit();
+      });
+    </script>
+  </body>
+</html>

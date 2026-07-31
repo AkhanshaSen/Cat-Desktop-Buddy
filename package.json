@@ -6,18 +6,67 @@
   "scripts": {
     "start": "node scripts/start.js",
     "start:cat2": "node scripts/start-cat2.js",
+    "start:launcher": "electron launcher-main.js --show-launcher",
     "dev": "node scripts/start.js",
     "dev:cat2": "node scripts/start-cat2.js",
     "stop": "node scripts/stop.js",
     "test:gemini": "node scripts/test-gemini.js",
     "generate:cat2-clips": "node scripts/generate-cat2-placeholders.js",
     "process:cat2-food": "node scripts/process-cat2-food-clips.js",
-    "test:cat2-walk": "node scripts/test-cat2-walk-sync.js"
+    "test:cat2-walk": "node scripts/test-cat2-walk-sync.js",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux"
   },
   "keywords": ["desktop-pet", "cat", "buddy", "electron"],
-  "author": "",
+  "author": "Akhansha_Sen",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^35.0.0"
+    "electron": "^35.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.akhanshasen.ai-meow",
+    "productName": "AI Meow",
+    "copyright": "Copyright © 2026 Akhansha_Sen",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "launcher-main.js",
+      "preload.js",
+      "preload-launcher.js",
+      "src/**/*",
+      "main/**/*",
+      "assets/clips/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "assets/clips/**/*"
+    ],
+    "extraMetadata": {
+      "main": "launcher-main.js"
+    },
+    "mac": {
+      "category": "public.app-category.entertainment",
+      "target": ["dmg", "zip"],
+      "identity": null
+    },
+    "win": {
+      "target": ["nsis", "portable"]
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Game"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   }
 }
