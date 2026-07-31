@@ -50,13 +50,15 @@
     "extraMetadata": {
       "main": "launcher-main.js"
     },
+    "publish": null,
     "mac": {
       "category": "public.app-category.entertainment",
       "target": ["dmg", "zip"],
       "identity": null
     },
     "win": {
-      "target": ["nsis", "portable"]
+      "target": ["nsis", "portable"],
+      "signAndEditExecutable": false
     },
     "linux": {
       "target": ["AppImage", "deb"],
