@@ -204,6 +204,54 @@ function createTrayIcon() {
   return nativeImage.createFromBuffer(buf, { width: size, height: size });
 }
 
+/** Windows: frameless+transparent windows show a phantom "AI Meow" title bar on blur (Electron 35.5+). */
+const WIN32_EMPTY_TITLE = '\u200B';
+
+function applyWin32FramelessFixes(win) {
+  if (process.platform !== 'win32' || !win || win.isDestroyed()) return;
+
+  win.setMenuBarVisibility(false);
+  win.setMenu(null);
+  win.setTitle(WIN32_EMPTY_TITLE);
+  win.setMaximizable(false);
+  win.setMinimizable(false);
+  win.setFullScreenable(false);
+
+  let refreshTimer = null;
+  const refreshFramelessChrome = () => {
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => {
+      refreshTimer = null;
+      if (win.isDestroyed()) return;
+      try {
+        win.setBackgroundColor('#00000000');
+        win.setTitle(WIN32_EMPTY_TITLE);
+        const [w, h] = win.getSize();
+        win.setResizable(true);
+        win.setSize(w, h + 1);
+        win.setSize(w, h);
+        win.setResizable(false);
+      } catch (_) { /* window closing */ }
+    }, 16);
+  };
+
+  win.on('blur', refreshFramelessChrome);
+  win.on('focus', refreshFramelessChrome);
+  win.on('show', refreshFramelessChrome);
+
+  win.webContents.on('page-title-updated', (event) => {
+    event.preventDefault();
+    if (!win.isDestroyed()) win.setTitle(WIN32_EMPTY_TITLE);
+  });
+
+  win.webContents.on('did-finish-load', () => {
+    if (win.isDestroyed()) return;
+    win.setTitle(WIN32_EMPTY_TITLE);
+    win.webContents.executeJavaScript("document.title='\\u200B'", true).catch(() => {});
+    refreshFramelessChrome();
+  });
+}
+
 function createCatWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   const winHeight = IS_CAT2 ? 460 : 240;
@@ -221,13 +269,22 @@ function createCatWindow() {
     resizable: false,
     skipTaskbar: true,
     hasShadow: false,
-    ...(process.platform === 'win32' && { thickFrame: false }),
+    title: WIN32_EMPTY_TITLE,
+    ...(process.platform === 'win32' && {
+      maximizable: false,
+      minimizable: false,
+      fullscreenable: false,
+    }),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
+
+  if (process.platform === 'win32') {
+    applyWin32FramelessFixes(catWindow);
+  }
 
   catWindow.loadFile(path.join(__dirname, 'src', IS_CAT2 ? 'index-cat2.html' : 'index.html'));
 
@@ -368,6 +425,9 @@ if (gotSingleInstanceLock) {
   app.whenReady().then(() => {
     if (process.platform === 'darwin' && app.dock) {
       app.dock.hide();
+    }
+    if (process.platform === 'win32') {
+      Menu.setApplicationMenu(null);
     }
 
     createCatWindow();
