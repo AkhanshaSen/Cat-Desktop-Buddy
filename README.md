@@ -221,3 +221,5 @@ Cat-Desktop-Buddy/
 ---
 
 Made with 💕 and purrs.
+
+- Developed By Akhansha_Sen with Cursor
