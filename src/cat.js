@@ -26,6 +26,7 @@
 
   let speechTimeout = null;
   let isDraggingWindow = false;
+  let dragPending = false;
   let dragStart = { x: 0, y: 0 };
   let hasMoved = false;
   let isSleeping = false;
@@ -968,20 +969,27 @@
 
   /* ── Event listeners ── */
   function endWindowDrag() {
-    if (!isDraggingWindow) return;
-    isDraggingWindow = false;
-    window.meowAPI?.dragEnd?.();
+    catContainer.removeEventListener('pointermove', onWindowPointerMove);
+    if (isDraggingWindow) {
+      isDraggingWindow = false;
+      window.meowAPI?.dragEnd?.();
+    }
+    dragPending = false;
   }
 
   function onWindowPointerMove(e) {
-    if (!isDraggingWindow) return;
+    if (!dragPending && !isDraggingWindow) return;
     const dx = e.screenX - dragStart.x;
     const dy = e.screenY - dragStart.y;
-    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) hasMoved = true;
-    if (hasMoved && window.meowAPI) {
-      window.meowAPI.dragWindow(dx, dy);
-      dragStart = { x: e.screenX, y: e.screenY };
+    if (!isDraggingWindow && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
+      isDraggingWindow = true;
+      hasMoved = true;
+      window.meowAPI?.dragBegin?.();
+      try { catContainer.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
     }
+    if (!isDraggingWindow || !window.meowAPI) return;
+    window.meowAPI.dragWindow(dx, dy);
+    dragStart = { x: e.screenX, y: e.screenY };
   }
 
   window.addEventListener('mousemove', (e) => {
@@ -1052,22 +1060,18 @@
     if (e.target.closest('.quit-x') || e.target.closest('.focus-badge') || e.target.closest('.chat-panel') ||
         e.target.closest('#food-bowl') || e.target.closest('.pet-zone')) return;
     closeContextMenu();
-    isDraggingWindow = true;
+    dragPending = true;
     hasMoved = false;
     dragStart = { x: e.screenX, y: e.screenY };
-    window.meowAPI?.dragBegin?.();
-    try { catContainer.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
     catContainer.addEventListener('pointermove', onWindowPointerMove);
   });
 
   catContainer.addEventListener('pointerup', (e) => {
-    catContainer.removeEventListener('pointermove', onWindowPointerMove);
     try { catContainer.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
     endWindowDrag();
   });
 
   catContainer.addEventListener('pointercancel', (e) => {
-    catContainer.removeEventListener('pointermove', onWindowPointerMove);
     try { catContainer.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
     endWindowDrag();
   });

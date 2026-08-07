@@ -8,12 +8,13 @@ A floating cute cat desktop buddy for **macOS and Windows**. Meow lives on your 
 
 ## Features
 
-- **Full mini cat** — animated SVG with expressions, eye tracking, and 58+ animations
-- **Little agent** — ask Meow to open apps ("open notepad", "open the camera", "open the calculator") and it launches them on macOS or Windows
+- **Two cats to choose from** — classic SVG Cat 1, or video-clip Cat 2 with hunger meter, feed prompts, and idle activities
+- **Full mini cat** — expressions, eye tracking, and 58+ animations (Cat 1) / video clips (Cat 2)
+- **Little agent** — ask Meow to open apps, folders, and websites offline on macOS or Windows (see [commands](#meow-the-little-agent) below)
 - **Chat dialog** — talk about your day, get motivation, or something cute
-- **Look tab** — change coat color and accessories (hat, bow, scarf, flower, glasses)
+- **Look tab** (Cat 1) — change coat color and accessories (hat, bow, scarf, flower, glasses)
 - **Food system** — drag bowl to feed; choose Plain or Fishy; learns your preferences over time
-- **Idle life** — laptop, reading, phone, coffee, notebook, gaming, walking, napping
+- **Idle life** — laptop, reading, phone, coffee, notebook, gaming, walking, napping, scratching, and more
 - **Focus Mode & Settings** — quiet/normal/chatty, reduced motion, break snooze defaults
 - **Break reminder** — after 2 hours of continuous work, with 10/30/60 min snooze
 - **System tray** — hide/show or quit from the menu bar (macOS) or notification area (Windows)
@@ -42,10 +43,10 @@ cd Cat-Desktop-Buddy
 
 ### 2. Double-click to start
 
-| OS | File |
-|----|------|
-| **Windows** | Double-click `Start Meow.bat` |
-| **macOS** | Double-click `Start Meow.command` |
+| OS | Cat 1 | Cat 2 |
+|----|-------|-------|
+| **Windows** | `Start Meow.bat` | `npm run start:cat2` |
+| **macOS** | `Start Meow.command` | `Start Meow 2.command` |
 
 - **First run** installs dependencies automatically (`npm install`) — may take a minute.
 - **Later runs** start Meow immediately.
@@ -54,35 +55,66 @@ cd Cat-Desktop-Buddy
 ### Terminal (optional)
 
 ```bash
-npm install   # first time only
-npm start
-npm run stop  # if cats won't disappear
+npm install        # first time only
+npm start          # Cat 1
+npm run start:cat2 # Cat 2
+npm run stop       # if cats won't disappear
 ```
 
 ## Meow the little agent
 
-Meow can open and close apps for you. Just type a request in the chat, like:
+Meow can open and close apps for you. **Click the cat** to open chat, then type a request like:
 
-- "open notepad" / "pull up something to write in"
-- "open the camera" (Photo Booth on macOS, Camera on Windows)
-- "open the calculator", "open the browser", "what time is it?"
-- "close notepad", "quit the calculator", "exit terminal"
-- "what can you do?" — Meow lists everything it knows
+### Open apps
 
-Meow maps each request to the matching app on your OS (for example, TextEdit on macOS or Notepad on Windows). Opening uses `open -a` (macOS) or `start` (Windows); closing quits the app gracefully via AppleScript (macOS) or `taskkill` (Windows). Only a fixed allowlist of common apps can be opened or closed — Meow never runs arbitrary commands.
+| Say something like… | Opens |
+|---------------------|-------|
+| "open notepad" / "pull up something to write in" | TextEdit (Mac) · Notepad (Windows) |
+| "open the camera" / "take a selfie" | Photo Booth (Mac) · Camera (Windows) |
+| "open the calculator" | Calculator |
+| "open the terminal" | Terminal (Mac) · Command Prompt (Windows) |
+| "open file explorer" / "open my files" | Finder (Mac) · Explorer (Windows) |
+| "open my downloads" | Downloads folder |
+| "open photos" | Photos |
+| "open the calendar" | Calendar |
+| "open mail" | Mail |
+| "open contacts" | Contacts |
+| "open reminders" | Reminders (Mac) · To Do (Windows) |
+| "open the clock" | Clock / Alarms |
+| "open weather" | Weather |
+| "open maps" | Maps |
+| "open system settings" | System Settings (Mac) · Settings (Windows) |
+| "open music" | Music (Mac) · Media Player (Windows) |
+| "open voice memos" | Voice Memos (Mac) · Voice Recorder (Windows) |
+| "open screenshot tool" | Screenshot (Mac) · Snipping Tool (Windows) |
+| "open sticky notes" | Stickies (Mac) · Sticky Notes (Windows) |
+| "open paint" | Preview (Mac) · Paint (Windows) |
+| "open task manager" | Activity Monitor (Mac) · Task Manager (Windows) |
+| "open the app store" | App Store (Mac) · Microsoft Store (Windows) |
+| "open the browser" | Google in your default browser |
+| "open youtube" / "open wikipedia" | YouTube / Wikipedia |
+| "open google.com" | Any website (http/https) |
+
+### Other commands
+
+- **"what time is it?"** — current time and date
+- **"what can you do?"** — list everything Meow knows
+- **"close notepad"** / **"quit the calculator"** — close an allowlisted app
+
+Meow maps each request to the matching app on your OS. Opening uses `open -a` (macOS) or `start` (Windows); closing quits the app gracefully via AppleScript (macOS) or `taskkill` (Windows). Only a fixed allowlist of common apps can be opened or closed — Meow never runs arbitrary shell commands.
 
 ### Common commands are free and offline
 
 The most frequent "open X" commands are recognized on-device, so they work instantly with **no account and no cost**.
 
-### Optional: natural language via OpenAI
+### Optional: natural language via Gemini
 
-For fuzzier phrasing ("open whatever I use to jot things down"), you can add an OpenAI API key in the **Settings** tab (⚙):
+For fuzzier phrasing ("open whatever I use to jot things down"), add a **Gemini API key** in the **Settings** tab (⚙):
 
-1. Get a key from [platform.openai.com](https://platform.openai.com/api-keys).
-2. Open Meow → Settings → paste the key under **OpenAI API key** → **Save**.
+1. Get a free key from [aistudio.google.com](https://aistudio.google.com).
+2. Open Meow → Settings → paste the key under **Gemini API key** → **Save** → **Test Gemini**.
 
-The key is stored locally in the app's user-data folder and is used only from the app's main process — it is never sent anywhere except OpenAI. Usage of the OpenAI API is billed by OpenAI (the default `gpt-4o-mini` model is inexpensive). You can turn the whole feature off with the **Let Meow do tasks** toggle.
+The key is stored locally in the app's user-data folder and is used only from the main process — it is never sent anywhere except Google Gemini. You can turn the whole feature off with the **Let Meow do tasks** toggle.
 
 ## Windows compatibility
 
@@ -91,7 +123,8 @@ AI Meow is built for **Windows as a first-class platform**, not macOS-only:
 | Feature | Windows behavior |
 |---------|------------------|
 | Launch scripts | Cross-platform `npm start` / `Start Meow.bat` |
-| Transparent window | Enabled with Windows-safe frame settings |
+| Transparent window | Frameless window with Windows-specific chrome fixes |
+| Drag the cat | Full-screen movement; no stuck/small drag area after repeated moves |
 | Tray | Notification area (system tray) — right-click for Show/Hide/Quit, **double-click** to toggle |
 | Break alert | Window nudge + taskbar flash |
 | Stop script | PowerShell-based process kill via `npm run stop` |
@@ -113,6 +146,12 @@ npm run dist:mac      # macOS .dmg (run on macOS)
 
 Output goes to the `dist/` folder.
 
+| Installer | Best for |
+|-----------|----------|
+| `AI Meow Setup x.x.x.exe` | Windows friends — full NSIS installer |
+| `AI Meow x.x.x.exe` | Windows portable — no install step |
+| `AI Meow-x.x.x.dmg` | Mac friends |
+
 ### Mac → Windows (or Mac → Mac)
 
 **You cannot send a Mac build to a Windows friend.** Installers are OS-specific:
@@ -126,9 +165,7 @@ Output goes to the `dist/` folder.
 
 **Yes — you can build on your device and send the file** (Google Drive, Dropbox, etc.), as long as it matches their OS. Your friend double-clicks the installer; no Node.js required.
 
-**If you only have a Mac but friends use Windows**, you need one of:
-- A Windows PC (or VM) to run `npm run dist:win`
-- **GitHub Actions** to build Windows automatically on every release (free for public repos)
+**If you only have a Mac but friends use Windows**, use **GitHub Actions** — pushes to `main` automatically build Mac and Windows installers (see `.github/workflows/build-desktop.yml`).
 
 ### First launch — pick your buddy
 
@@ -178,45 +215,71 @@ The picker appears **every time** the app starts so you can switch cats whenever
 - **Chatty level** — Quiet / Normal / Chatty
 - **Reduced motion** — fewer animations
 - **Break snooze default** — 10 / 30 / 60 min
+- **Gemini API key** — optional, for natural-language tasks beyond offline commands
 
 ## Chat examples
 
+**Feelings & small talk**
 - "Hi Meow!" — friendly greeting
 - "My day was really good!" — happy response
 - "I'm feeling stressed" — gentle encouragement
 - "I need motivation" — pep talk
 - "Tell me something cute" — adorable cat facts
 
+**Tasks (offline, no key needed)**
+- "open the camera"
+- "open maps"
+- "open my downloads"
+- "what time is it?"
+- "what can you do?"
+
+## Development & testing
+
+```bash
+npm run test:commands       # loop all offline commands (intent + launcher checks)
+npm run test:commands -- --live  # actually open each app on your machine
+npm run test:gemini         # test Gemini API connection
+npm run test:cat2-walk      # Cat 2 walk sync sanity check
+```
+
+Command tests run automatically in CI on both macOS and Windows before installers are built.
+
 ## Project structure
 
 ```
 Cat-Desktop-Buddy/
-├── Start Meow.bat       # Windows one-click launch
-├── Start Meow.command   # macOS one-click launch
-├── launcher-main.js     # Packaged app: cat picker entry
-├── main.js
+├── Start Meow.bat / .command      # One-click launch (Cat 1)
+├── Start Meow 2.command           # One-click launch (Cat 2, macOS)
+├── launcher-main.js               # Packaged app: cat picker entry
+├── main.js                        # Electron main process
 ├── preload.js
-├── preload-launcher.js
+├── main/
+│   ├── agent.js                   # Chat agent orchestrator
+│   ├── actions.js                 # Allowlisted OS app launcher
+│   ├── intents.js                 # Offline command matcher
+│   └── gemini.js                  # Gemini API client
 ├── scripts/
-│   ├── start.js
-│   └── stop.js
-├── src/
-│   ├── index.html
-│   ├── styles.css
-│   ├── cat.js
-│   ├── chat.js
-│   ├── settings.js
-│   ├── appearance.js
-│   └── personality.js
-└── package.json
+│   ├── start.js / start-cat2.js
+│   ├── stop.js
+│   └── test-commands.js           # Command test loop
+└── src/
+    ├── index.html                 # Cat 1 shell
+    ├── index-cat2.html            # Cat 2 shell
+    ├── cat.js                     # Cat 1 behavior
+    ├── cat2/                      # Cat 2 modules (feed, sleep, activities, …)
+    ├── chat.js
+    ├── settings.js
+    ├── appearance.js
+    └── personality.js
 ```
 
 ## Tips
 
 - Meow starts in the bottom-right corner of your screen
-- Drag empty space around the cat to move the window
+- **Click the cat body** to open/close chat
+- **Drag the cat** to move the window (hold and move — a small threshold avoids accidental drags when clicking)
 - Drag the food bowl to the cat's mouth to feed
-- Open chat → **✨ Look** for coat/accessories · **⚙** for Focus Mode & settings
+- Open chat → **✨ Look** (Cat 1) for coat/accessories · **⚙** for Focus Mode & settings
 
 ---
 

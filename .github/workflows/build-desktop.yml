@@ -28,7 +28,29 @@ env:
   ELECTRON_BUILDER_DISABLE_WINDOWS_CODE_SIGNING: true
 
 jobs:
+  test-commands:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run offline command tests
+        run: npm run test:commands
+
   build-mac:
+    needs: test-commands
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -58,6 +80,7 @@ jobs:
           retention-days: 30
 
   build-windows:
+    needs: test-commands
     runs-on: windows-latest
     steps:
       - name: Checkout

@@ -333,7 +333,7 @@
           <span class="toggle-slider"></span>
         </label>
       </div>
-      <p class="settings-hint">Ask me to open apps like "open notepad" or "open the camera"</p>
+      <p class="settings-hint">Ask me to open apps like "open notepad", "open the camera", "open maps", or "open google.com"</p>
 
       <div class="settings-row settings-col">
         <span class="settings-label">Gemini API key <span class="settings-optional">(optional)</span></span>
