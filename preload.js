@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('meowAPI', {
     if (dx === 0 && dy === 0) return;
     ipcRenderer.send('window-drag', { deltaX: dx, deltaY: dy });
   },
+  dragBegin: () => ipcRenderer.send('window-drag-begin'),
+  dragEnd: () => ipcRenderer.send('window-drag-end'),
   hideWindow: () => ipcRenderer.send('window-minimize'),
   quitApp: () => ipcRenderer.send('app-quit'),
   resizeWindow: (width, height, anchorBottom = false) =>

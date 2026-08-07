@@ -12,43 +12,88 @@ if (IS_CAT2) {
 
 let catWindow = null;
 let tray = null;
+let catWindowTargetSize = { width: 220, height: 240 };
+let catWindowDragging = false;
 
-function toSafeInt(value, fallback = 0) {
-  const n = Number(value);
-  return Number.isFinite(n) ? Math.round(n) : fallback;
+const CAT_WINDOW_WIDTH = 220;
+
+function getDefaultCatWindowHeight() {
+  return IS_CAT2 ? 460 : 240;
+}
+
+function getWorkAreaForWindow(win) {
+  const bounds = win.getBounds();
+  const cx = bounds.x + bounds.width / 2;
+  const cy = bounds.y + bounds.height / 2;
+  return screen.getDisplayNearestPoint({ x: Math.round(cx), y: Math.round(cy) }).workArea;
+}
+
+function ensureCatWindowSize(win) {
+  if (!win || win.isDestroyed()) return;
+  const { width: expectedW, height: expectedH } = catWindowTargetSize;
+  const bounds = win.getBounds();
+  if (bounds.width === expectedW && bounds.height === expectedH) return;
+
+  const area = getWorkAreaForWindow(win);
+  let nextX = bounds.x;
+  let nextY = bounds.y;
+  const maxX = area.x + area.width - expectedW;
+  const maxY = area.y + area.height - expectedH;
+  nextX = Math.min(Math.max(area.x, nextX), Math.max(area.x, maxX));
+  nextY = Math.min(Math.max(area.y, nextY), Math.max(area.y, maxY));
+
+  win.setBounds({
+    x: nextX,
+    y: nextY,
+    width: expectedW,
+    height: expectedH,
+  }, false);
 }
 
 function moveCatWindow(deltaX, deltaY) {
-  if (!catWindow) return;
+  if (!catWindow || catWindow.isDestroyed()) return;
   const dx = toSafeInt(deltaX, 0);
   const dy = toSafeInt(deltaY, 0);
   if (dx === 0 && dy === 0) return;
 
-  const [x, y] = catWindow.getPosition();
-  const [width, height] = catWindow.getSize();
-  const display = screen.getDisplayMatching(catWindow.getBounds());
-  const area = display.workArea;
-  const nextX = Math.min(Math.max(area.x, toSafeInt(x, 0) + dx), area.x + area.width - width);
-  const nextY = Math.min(Math.max(area.y, toSafeInt(y, 0) + dy), area.y + area.height - height);
-  catWindow.setPosition(nextX, nextY);
+  ensureCatWindowSize(catWindow);
+
+  const bounds = catWindow.getBounds();
+  const area = getWorkAreaForWindow(catWindow);
+  const width = catWindowTargetSize.width;
+  const height = catWindowTargetSize.height;
+
+  const minX = area.x;
+  const minY = area.y;
+  const maxX = Math.max(minX, area.x + area.width - width);
+  const maxY = Math.max(minY, area.y + area.height - height);
+
+  const nextX = Math.min(Math.max(minX, bounds.x + dx), maxX);
+  const nextY = Math.min(Math.max(minY, bounds.y + dy), maxY);
+
+  catWindow.setBounds({ x: nextX, y: nextY, width, height }, false);
 }
 
 function getCatWindowPlacement() {
   if (!catWindow) return null;
-  const [x, y] = catWindow.getPosition();
-  const [width, height] = catWindow.getSize();
-  const display = screen.getDisplayMatching(catWindow.getBounds());
-  const area = display.workArea;
+  ensureCatWindowSize(catWindow);
+  const bounds = catWindow.getBounds();
+  const area = getWorkAreaForWindow(catWindow);
   const edgeMargin = 28;
   return {
-    x,
-    y,
-    width,
-    height,
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
     workArea: { x: area.x, y: area.y, width: area.width, height: area.height },
-    nearLeft: x <= area.x + edgeMargin,
-    nearRight: x + width >= area.x + area.width - edgeMargin,
+    nearLeft: bounds.x <= area.x + edgeMargin,
+    nearRight: bounds.x + bounds.width >= area.x + area.width - edgeMargin,
   };
+}
+
+function toSafeInt(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.round(n) : fallback;
 }
 
 // ── Continuous work tracker (global mouse/keyboard via system idle time) ──
@@ -219,17 +264,20 @@ function applyWin32FramelessFixes(win) {
 
   let refreshTimer = null;
   const refreshFramelessChrome = () => {
+    if (catWindowDragging) return;
     if (refreshTimer) clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => {
       refreshTimer = null;
-      if (win.isDestroyed()) return;
+      if (win.isDestroyed() || catWindowDragging) return;
       try {
         win.setBackgroundColor('#00000000');
         win.setTitle(WIN32_EMPTY_TITLE);
-        const [w, h] = win.getSize();
+        ensureCatWindowSize(win);
+        const bounds = win.getBounds();
+        const { width: w, height: h } = catWindowTargetSize;
         win.setResizable(true);
-        win.setSize(w, h + 1);
-        win.setSize(w, h);
+        win.setBounds({ x: bounds.x, y: bounds.y, width: w, height: h + 1 }, false);
+        win.setBounds({ x: bounds.x, y: bounds.y, width: w, height: h }, false);
         win.setResizable(false);
       } catch (_) { /* window closing */ }
     }, 16);
@@ -254,8 +302,9 @@ function applyWin32FramelessFixes(win) {
 
 function createCatWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-  const winHeight = IS_CAT2 ? 460 : 240;
+  const winHeight = getDefaultCatWindowHeight();
   const bottomMargin = 20;
+  catWindowTargetSize = { width: CAT_WINDOW_WIDTH, height: winHeight };
 
   catWindow = new BrowserWindow({
     width: 220,
@@ -353,6 +402,17 @@ ipcMain.on('window-drag', (_event, payload = {}) => {
   moveCatWindow(payload.deltaX, payload.deltaY);
 });
 
+ipcMain.on('window-drag-begin', () => {
+  catWindowDragging = true;
+});
+
+ipcMain.on('window-drag-end', () => {
+  catWindowDragging = false;
+  if (catWindow && !catWindow.isDestroyed()) {
+    ensureCatWindowSize(catWindow);
+  }
+});
+
 ipcMain.handle('window:get-placement', () => getCatWindowPlacement());
 
 ipcMain.on('window-minimize', () => {
@@ -365,24 +425,29 @@ ipcMain.on('app-quit', () => {
 
 ipcMain.on('window-resize', (_event, payload = {}) => {
   if (!catWindow) return;
-  const width = toSafeInt(payload.width, 220);
-  const height = toSafeInt(payload.height, 240);
+  const width = toSafeInt(payload.width, CAT_WINDOW_WIDTH);
+  const height = toSafeInt(payload.height, getDefaultCatWindowHeight());
   const anchorBottom = !!payload.anchorBottom;
-  const [x, y] = catWindow.getPosition();
-  const [, currentHeight] = catWindow.getSize();
+  catWindowTargetSize = { width, height };
 
+  const bounds = catWindow.getBounds();
   if (anchorBottom) {
-    const bounds = catWindow.getBounds();
     const bottom = bounds.y + bounds.height;
     catWindow.setBounds({
       x: bounds.x,
       y: bottom - height,
       width,
       height,
-    });
+    }, false);
   } else {
-    catWindow.setSize(width, height);
+    catWindow.setBounds({
+      x: bounds.x,
+      y: bounds.y,
+      width,
+      height,
+    }, false);
   }
+  moveCatWindow(0, 0);
 });
 
 ipcMain.on('break-dismissed', () => {

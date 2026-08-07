@@ -1138,6 +1138,23 @@
     recordActivityStart, canPickActivity,
   } = ctx);
 
+  function endWindowDrag() {
+    if (!isDraggingWindow) return;
+    isDraggingWindow = false;
+    window.meowAPI?.dragEnd?.();
+  }
+
+  function onWindowPointerMove(e) {
+    if (!isDraggingWindow) return;
+    const dx = e.screenX - dragStart.x;
+    const dy = e.screenY - dragStart.y;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) hasMoved = true;
+    if (hasMoved && window.meowAPI) {
+      window.meowAPI.dragWindow(Math.round(dx), Math.round(dy));
+      dragStart = { x: e.screenX, y: e.screenY };
+    }
+  }
+
   /* ── Event listeners ── */
   window.addEventListener('mousemove', (e) => {
     mouseX = e.clientX;
@@ -1151,16 +1168,6 @@
       foodBowl.style.left = `${e.clientX - sceneRect.left - bowlOffset.x}px`;
       foodBowl.style.top = `${e.clientY - sceneRect.top - bowlOffset.y}px`;
       checkBowlNearCat();
-      return;
-    }
-
-    if (!isDraggingWindow) return;
-    const dx = e.screenX - dragStart.x;
-    const dy = e.screenY - dragStart.y;
-    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) hasMoved = true;
-    if (hasMoved && window.meowAPI) {
-      window.meowAPI.dragWindow(Math.round(dx), Math.round(dy));
-      dragStart = { x: e.screenX, y: e.screenY };
     }
   });
 
@@ -1175,8 +1182,10 @@
       }
       return;
     }
-    isDraggingWindow = false;
+    endWindowDrag();
   });
+
+  window.addEventListener('blur', endWindowDrag);
 
   foodBowl.addEventListener('mousedown', (e) => {
     e.stopPropagation();
@@ -1226,7 +1235,8 @@
     window.dispatchEvent(new CustomEvent('meow:click'));
   });
 
-  catContainer.addEventListener('mousedown', (e) => {
+  catContainer.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
     if (e.target.closest('.quit-x') || e.target.closest('.focus-badge') ||
         e.target.closest('.chat-panel') || e.target.closest('#food-bowl') ||
         e.target.closest('.pet-zone') || e.target.closest('#food-choice') ||
@@ -1236,6 +1246,21 @@
     isDraggingWindow = true;
     hasMoved = false;
     dragStart = { x: e.screenX, y: e.screenY };
+    window.meowAPI?.dragBegin?.();
+    try { catContainer.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+    catContainer.addEventListener('pointermove', onWindowPointerMove);
+  });
+
+  catContainer.addEventListener('pointerup', (e) => {
+    catContainer.removeEventListener('pointermove', onWindowPointerMove);
+    try { catContainer.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+    endWindowDrag();
+  });
+
+  catContainer.addEventListener('pointercancel', (e) => {
+    catContainer.removeEventListener('pointermove', onWindowPointerMove);
+    try { catContainer.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+    endWindowDrag();
   });
 
   quitBtn.addEventListener('mousedown', (e) => e.stopPropagation());
