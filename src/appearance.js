@@ -12,6 +12,7 @@
     snow:   { fur: '#f8f8fc', shadow: '#dcdce8', paw: '#eeeef4', earInner: '#ffd6e8', label: 'Snow' },
     lilac:  { fur: '#ddd0f0', shadow: '#b8a0d8', paw: '#cfc0e8', earInner: '#ffb8d8', label: 'Lilac' },
   };
+  
 
   const ACCESSORIES = {
     none:    { label: 'None', emoji: '✕' },
