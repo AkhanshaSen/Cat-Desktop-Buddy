@@ -555,6 +555,7 @@
     ctx.showSpeech = showSpeech;
     ctx.hideSpeech = hideSpeech;
     ctx.sayDialogue = sayDialogue;
+    ctx.pickDialogue = pickDialogue;
     ctx.playAnimation = playAnimation;
     ctx.cat2ActivityLog = cat2ActivityLog;
     ctx.spawnHeartsAtCat = spawnHeartsAtCat;
@@ -937,6 +938,7 @@
     const tick = () => {
       const settings = getSettings();
       if (settings.focusMode || isFocusMode) return;
+      if (window.MeowProductivity?.shouldSuppressIdle?.()) return;
       if (isChatOpen() || isSleeping || isEating || breakAlertActive || feedState.isAwaitingChoice() || feedState.isFlowActive()) return;
 
       if (CLIP_FLOW_MODE) {
@@ -944,12 +946,18 @@
         if (Cat2Player.getCurrentKey() !== 'idle') return;
         if (catEl.dataset.begging === 'true' || feedState.isAwaitingChoice() || feedState.isFlowActive()) return;
         const level = settings.chattyLevel || 'normal';
+        const patrol = !!settings.patrolMode || window.MeowProductivity?.isPatrolModeActive?.();
         if (foodMood && Math.random() < (level === 'quiet' ? 0.12 : 0.22)) {
           sayDialogue(foodMood === 'good' ? 'goodMood' : 'grumpyMood', 3500);
           return;
         }
-        const activityChance = level === 'quiet' ? 0.28 : level === 'chatty' ? 0.82 : 0.55;
+        let activityChance = level === 'quiet' ? 0.28 : level === 'chatty' ? 0.82 : 0.55;
+        if (patrol) activityChance = Math.min(0.95, activityChance + 0.25);
         if (Math.random() > activityChance) return;
+        if (patrol && Math.random() < 0.55) {
+          startWalk();
+          return;
+        }
         pickRandomClipActivity();
         return;
       }
@@ -966,13 +974,25 @@
       }
 
       const roll = Math.random();
+      const patrol = !!settings.patrolMode || window.MeowProductivity?.isPatrolModeActive?.();
 
-      if (level === 'quiet') {
+      if (level === 'quiet' && !patrol) {
         if (!isBusy && !animLock && roll < 0.25) {
           startRandomActivity();
         } else if (!isBusy && !animLock && roll < 0.4) {
           goToSleep(15000 + Math.random() * 10000);
         } else if (!isBusy && roll < 0.55) {
+          playRandomAnimation();
+        }
+        return;
+      }
+
+      if (patrol) {
+        if (!isBusy && !animLock && roll < 0.55) {
+          startWalk();
+        } else if (!isBusy && !animLock && roll < 0.8) {
+          startRandomActivity();
+        } else if (!isBusy && roll < 0.92) {
           playRandomAnimation();
         }
         return;
@@ -1033,7 +1053,10 @@
     buddyStack()?.classList.remove('break-glow');
     window.meowAPI?.dismissBreakReminder();
     if (catEl.dataset.expression === 'excited') setExpression('happy');
-    if (!isChatOpen()) window.meowAPI?.resizeWindow(220, COMPACT_H, false);
+    if (!isChatOpen()) {
+      if (window.MeowProductivity?.applyWindowSize) window.MeowProductivity.applyWindowSize();
+      else window.meowAPI?.resizeWindow(220, COMPACT_H, false);
+    }
   }
 
   function buddyStack() {
@@ -1132,7 +1155,7 @@
     loadFoodPrefs, updateFoodStars, isBowlOnCooldown, resetBowlPosition,
     checkBowlNearCat, completePostMealSequence,
     stopWalk, startWalk, goToSleepClip, wakeUp, goToSleep,
-    onWalkClipVisible, onButterflyClipVisible, stopClipMovement,
+    onWalkClipVisible, onButterflyClipVisible, ensureWalkMovementStarted, stopClipMovement,
     isAnimating, canDoActivity, isPettingNow, stopActivity, startRandomActivity,
     startButterflyChase, finishButterflyChase, stopScratchActivity,
     pickRandomClipActivity, startCursorAwayWatch, noteCursorProximity,
@@ -1213,9 +1236,23 @@
   catFigure.addEventListener('click', (e) => {
     if (e.target.closest('#food-bowl') || e.target.closest('.quit-x') ||
         e.target.closest('.focus-badge') || e.target.closest('.pet-zone') ||
-        e.target.closest('.scratch-stop-prompt') || e.target.closest('.scratch-stop-btn')) return;
+        e.target.closest('.scratch-stop-prompt') || e.target.closest('.scratch-stop-btn') ||
+        e.target.closest('#notes-panel') || e.target.closest('#productivity-hub') ||
+        e.target.closest('#pinned-tasks-widget') ||
+        e.target.closest('#focus-session-modal') || e.target.closest('#focus-timer-widget') ||
+        e.target.closest('#water-chase-bubble')) return;
     if (hasMoved) return;
     e.stopPropagation();
+    if (e.shiftKey || e.altKey) {
+      if (window.MeowChat?.isDocked?.()) {
+        window.dispatchEvent(new CustomEvent('meow:click'));
+        return;
+      }
+      window.meowAPI?.log?.('cat shift/alt click → open focus');
+      window.meowAPI?.broadcast?.('hub:open', { tab: 'focus' });
+      window.dispatchEvent(new CustomEvent('meow:open-focus-session'));
+      return;
+    }
     if (catEl.dataset.playing === 'scratch') {
       stopScratchActivity({ source: 'cat-click' });
       window.dispatchEvent(new CustomEvent('meow:click'));
@@ -1225,7 +1262,11 @@
       window.dispatchEvent(new CustomEvent('meow:click'));
       return;
     }
-    if (wakeUp()) return;
+    // Wake from sleep, then still open/toggle the panel (do not swallow the click)
+    if (wakeUp()) {
+      window.dispatchEvent(new CustomEvent('meow:click'));
+      return;
+    }
     if (isEating) {
       stopEating();
       showSpeech(pickDialogue('feedInterrupt').text, 2000);
@@ -1243,13 +1284,28 @@
     window.dispatchEvent(new CustomEvent('meow:click'));
   });
 
+  catFigure.addEventListener('dblclick', (e) => {
+    if (e.target.closest('#food-bowl') || e.target.closest('.quit-x') || e.target.closest('.pet-zone')) return;
+    e.stopPropagation();
+    e.preventDefault();
+    // Rapid clicks while chat is docked must not open Focus (browser fires dblclick).
+    if (window.MeowChat?.isDocked?.()) return;
+    window.meowAPI?.log?.('cat dblclick → open focus');
+    window.meowAPI?.broadcast?.('hub:open', { tab: 'focus' });
+    window.dispatchEvent(new CustomEvent('meow:open-focus-session'));
+  });
+
   catContainer.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     if (e.target.closest('.quit-x') || e.target.closest('.focus-badge') ||
         e.target.closest('.chat-panel') || e.target.closest('#food-bowl') ||
         e.target.closest('.pet-zone') || e.target.closest('#food-choice') ||
         e.target.closest('.food-opt') || e.target.closest('.scratch-stop-prompt') ||
-        e.target.closest('.scratch-stop-btn')) return;
+        e.target.closest('.scratch-stop-btn') ||
+        e.target.closest('#notes-panel') || e.target.closest('#productivity-hub') ||
+        e.target.closest('#pinned-tasks-widget') ||
+        e.target.closest('#focus-session-modal') || e.target.closest('#focus-timer-widget') ||
+        e.target.closest('#focus-countdown-bar') || e.target.closest('#water-chase-bubble')) return;
     closeContextMenu();
     dragPending = true;
     hasMoved = false;
@@ -1353,7 +1409,7 @@
         resumeFeedSchedule();
       }
     }
-    if (key === 'reducedMotion' && typeof settings.reducedMotion === 'boolean') {
+    if ((key === 'reducedMotion' || key === 'all') && typeof settings.reducedMotion === 'boolean') {
       Cat2Player.setReducedMotion(settings.reducedMotion);
       if (!settings.reducedMotion && catEl.dataset.begging === 'true') {
         Cat2Player.forceRecover?.();
@@ -1364,10 +1420,10 @@
         }
       }
     }
-    if (key === 'catSounds' && typeof settings.catSounds === 'boolean') {
+    if ((key === 'catSounds' || key === 'all') && typeof settings.catSounds === 'boolean') {
       Cat2Player.setSoundsEnabled?.(settings.catSounds);
     }
-    if (key === 'chattyLevel') restartIdleLoop();
+    if (key === 'chattyLevel' || key === 'patrolMode' || key === 'all') restartIdleLoop();
     if (key === 'feedIntervalMinutes') {
       updateFeedIntervalDuration(getFeedIntervalMs());
     }
@@ -1402,6 +1458,9 @@
 
   window.addEventListener('cat2:clip-changed', (ev) => {
     cat2ActivityLog('clip-changed', ev.detail?.key ?? '?');
+    if (ev.detail?.key === 'walk' && catEl.dataset.waterChase !== 'true') {
+      requestAnimationFrame(() => ensureWalkMovementStarted());
+    }
   });
   window.addEventListener('cat2:clip-ended', (ev) => {
     cat2ActivityLog('clip-ended', ev.detail?.key ?? '?');
@@ -1423,9 +1482,63 @@
     if (ev.detail?.key === 'hungry') showFeedPrompt();
   });
 
+  let waterChaseWalk = false;
+
+  function applyWaterChaseFacing(dir) {
+    catEl.classList.remove('walking-left', 'walking-right');
+    catEl.classList.add(dir === -1 ? 'walking-left' : 'walking-right');
+  }
+
+  function ensureWaterChaseWalkClip() {
+    if (!waterChaseWalk) return;
+    catEl.dataset.walking = 'true';
+    const clip = Cat2Clips.get('walk');
+    const moveStart = clip?.moveStart ?? 0.04;
+    if (Cat2Player.getCurrentKey() !== 'walk') {
+      Cat2Player.switchClip('walk', { crossfade: false, force: true });
+    } else {
+      Cat2Player.seekActiveClip?.(moveStart);
+    }
+  }
+
+  window.addEventListener('meow:water-chase', (ev) => {
+    const active = !!ev.detail?.active;
+    if (active) {
+      waterChaseWalk = true;
+      catEl.dataset.waterChase = 'true';
+      stopWalk({ skipSync: true });
+      stopActivity?.();
+      stopClipMovement?.();
+      applyWaterChaseFacing(1);
+      if (CLIP_FLOW_MODE) ensureWaterChaseWalkClip();
+    } else if (waterChaseWalk) {
+      waterChaseWalk = false;
+      delete catEl.dataset.waterChase;
+      delete catEl.dataset.walking;
+      stopWalk();
+    }
+  });
+
+  window.addEventListener('meow:water-chase-face', (ev) => {
+    if (!waterChaseWalk) return;
+    const dir = ev.detail?.dir === -1 ? -1 : 1;
+    applyWaterChaseFacing(dir);
+  });
+
+  window.addEventListener('cat2:clip-ended', (ev) => {
+    if (waterChaseWalk && ev.detail?.key === 'walk') {
+      ensureWaterChaseWalkClip();
+    }
+  });
+
+  window.addEventListener('meow:focus-session', (ev) => {
+    if (ev.detail?.active) return;
+    if (isSleeping) wakeUp();
+  });
+
   Cat2Player.init(cat2VideoA, cat2VideoB, cat2CanvasA, cat2CanvasB, catEl);
   Cat2Player.setReducedMotion(!!initialSettings.reducedMotion);
-  Cat2Player.setSoundsEnabled?.(initialSettings.catSounds !== false);
+  Cat2Player.setSoundsEnabled?.(!!initialSettings.catSounds);
   Cat2Player.preloadClip?.('pet');
   Cat2Player.preloadClip?.('idle');
 
@@ -1457,7 +1570,7 @@
 
   window.MeowCat = {
     setExpression, setPose, bounce, wiggle,
-    showSpeech, hideSpeech, blink, wakeUp, stopEating,
+    showSpeech, hideSpeech, blink, wakeUp, stopEating, goToSleep,
     playAnimation, playRandomAnimation, triggerBreakAlert,
     stopActivity, startRandomActivity, stopWalk, startWalk, begForFood,
     startButterflyChase, petHead, goToSleepClip, pickRandomClipActivity,

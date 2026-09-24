@@ -21,7 +21,10 @@
                 <button id="tab-look" class="chat-tab" title="Change look">✨ Look</button>
                 <button id="tab-settings" class="chat-tab" title="Settings">⚙</button>
               </div>
-              <button id="close-chat" class="icon-btn" title="Close">×</button>
+              <div class="chat-header-actions">
+                <button type="button" id="open-hub-panel-btn" class="chat-open-panel-btn hidden" title="Open Polen's panel">📋</button>
+                <button id="close-chat" class="icon-btn" title="Close">×</button>
+              </div>
             </div>
 
             <div id="look-panel" class="look-panel hidden">
@@ -45,10 +48,12 @@
                 <input id="chat-input" type="text" placeholder="Chat or ask me to open something..." autocomplete="off" maxlength="500" />
                 <button id="send-btn" class="send-btn" title="Send">➤</button>
               </div>
-              <div class="quick-actions">
+              <div class="quick-actions" role="group" aria-label="Quick actions">
                 <button class="quick-btn" data-prompt="How was your day?">☀️ Day</button>
                 <button class="quick-btn" data-prompt="I need motivation">💪 Boost</button>
                 <button class="quick-btn" data-prompt="Tell me something cute">💕 Cute</button>
+                <button type="button" class="quick-btn" id="quick-tasks-btn" title="Today's tasks">📝 Tasks</button>
+                <button type="button" class="quick-btn" id="quick-focus-btn" title="Start focus session">⏱ Focus</button>
               </div>
             </div>
           </div>
@@ -69,6 +74,13 @@
           <div id="cat" class="cat" data-expression="happy" data-pose="loaf" data-coat="cream" data-accessory="none" data-activity="none">
             <div id="speech-bubble" class="speech-bubble hidden" aria-live="polite">
               <p id="speech-text"></p>
+              <div class="bubble-tail"></div>
+            </div>
+
+            <div id="water-chase-bubble" class="water-chase-bubble hidden" role="alert">
+              <p id="water-chase-text" class="water-chase-text">found you. drink water.</p>
+              <button type="button" id="water-ack-btn" class="water-ack-btn">I drank water 💧</button>
+              <button type="button" id="water-snooze-btn" class="water-snooze-btn">Not now</button>
               <div class="bubble-tail"></div>
             </div>
 
@@ -266,10 +278,16 @@
       </div>
     </div>
 
+    <script src="panel-cat-boot.js"></script>
     <script src="personality.js"></script>
     <script src="appearance.js"></script>
     <script src="settings.js"></script>
-    <script src="cat.js"></script>
+    <script src="productivity-logic.js"></script>
+    <script src="productivity.js"></script>
+    <script src="walk-placement.js"></script>
     <script src="chat.js"></script>
+    <script src="overlay-hit.js"></script>
+    <script src="cat.js"></script>
+    <script src="cat-bridge.js"></script>
   </body>
 </html>

@@ -15,7 +15,10 @@ A floating cute cat desktop buddy for **macOS and Windows**. Meow lives on your 
 - **Look tab** (Cat 1) — change coat color and accessories (hat, bow, scarf, flower, glasses)
 - **Food system** — drag bowl to feed; choose Plain or Fishy; learns your preferences over time
 - **Idle life** — laptop, reading, phone, coffee, notebook, gaming, walking, napping, scratching, and more
-- **Focus Mode & Settings** — quiet/normal/chatty, reduced motion, break snooze defaults
+- **Focus Mode & Settings** — quiet/normal/chatty, reduced motion, break snooze defaults (**Focus mode** = quiet paws; separate from Focus **session** timer)
+- **Today tasks panel** — floating checklist beside the cat; pin it so it stays visible while you drag
+- **Focus session** — double-click the cat (or Shift/Alt-click, or chat → ⏱ Focus) for a countdown timer; optional “procrastinating” nap beside the timer
+- **Water reminders** — optional cursor chase until you tap “I drank water,” with a small celebration payoff
 - **Break reminder** — after 2 hours of continuous work, with 10/30/60 min snooze
 - **System tray** — hide/show or quit from the menu bar (macOS) or notification area (Windows)
 
@@ -211,11 +214,19 @@ The picker appears **every time** the app starts so you can switch cats whenever
 
 ## Settings (chat → ⚙)
 
-- **Focus mode** — pause idle interruptions
+- **Focus mode** — quiet paws; pause idle interruptions (not the Focus session timer)
 - **Chatty level** — Quiet / Normal / Chatty
 - **Reduced motion** — fewer animations
 - **Break snooze default** — 10 / 30 / 60 min
+- **Water reminders** — enable + interval (30 / 45 / 60 min); cat chases cursor until acknowledged
 - **Gemini API key** — optional, for natural-language tasks beyond offline commands
+
+### Productivity (Tasks / Focus session)
+
+- Chat → **📝 Tasks** opens the Today panel; pin 📌 to keep it beside the cat when chat is closed
+- Chat → **⏱ Focus**, double-click the cat, or Shift/Alt-click → “Ready to focus?” duration picker
+- Check **I’ve been procrastinating** to nap beside the countdown during the session
+- When water is overdue, tap **I drank water** for a short celebration
 
 ## Chat examples
 
@@ -238,11 +249,12 @@ The picker appears **every time** the app starts so you can switch cats whenever
 ```bash
 npm run test:commands       # loop all offline commands (intent + launcher checks)
 npm run test:commands -- --live  # actually open each app on your machine
+npm run test:productivity   # day rollover, focus countdown, water overdue helpers
 npm run test:gemini         # test Gemini API connection
 npm run test:cat2-walk      # Cat 2 walk sync sanity check
 ```
 
-Command tests run automatically in CI on both macOS and Windows before installers are built.
+Command and productivity tests run automatically in CI on both macOS and Windows before installers are built.
 
 ## Project structure
 
@@ -261,10 +273,13 @@ Cat-Desktop-Buddy/
 ├── scripts/
 │   ├── start.js / start-cat2.js
 │   ├── stop.js
-│   └── test-commands.js           # Command test loop
+│   ├── test-commands.js           # Command test loop
+│   └── test-productivity.js       # Tasks / focus / water helpers
 └── src/
     ├── index.html                 # Cat 1 shell
     ├── index-cat2.html            # Cat 2 shell
+    ├── productivity-logic.js      # Pure helpers (also used by tests)
+    ├── productivity.js            # Today tasks, focus session, water chase
     ├── cat.js                     # Cat 1 behavior
     ├── cat2/                      # Cat 2 modules (feed, sleep, activities, …)
     ├── chat.js

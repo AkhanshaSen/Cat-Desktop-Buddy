@@ -11,6 +11,7 @@
 
   const DEFAULTS = {
     focusMode: false,
+    patrolMode: false, // wander/play; no scheduled feed prompts
     chattyLevel: 'normal', // quiet | normal | chatty
     reducedMotion: false,
     snoozeDuration: 30, // minutes: 10 | 30 | 60
@@ -20,12 +21,16 @@
 
   let current = { ...DEFAULTS };
 
+  // Load persisted values before other scripts read MeowSettings.get()
+  load();
+
   function load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
       const saved = JSON.parse(raw);
       if (typeof saved.focusMode === 'boolean') current.focusMode = saved.focusMode;
+      if (typeof saved.patrolMode === 'boolean') current.patrolMode = saved.patrolMode;
       if (['quiet', 'normal', 'chatty'].includes(saved.chattyLevel)) {
         current.chattyLevel = saved.chattyLevel;
       }
@@ -75,13 +80,30 @@
 
   function setFocusMode(value) {
     current.focusMode = !!value;
+    if (current.focusMode) current.patrolMode = false;
     save();
     notifyChange('focusMode');
+    notifyChange('patrolMode');
     window.MeowCat?.setFocusMode?.(current.focusMode);
     if (current.focusMode) {
       window.MeowCat?.showSpeech?.('Focus mode on — quiet paws~ 🌙', 2500);
     } else {
       window.MeowCat?.showSpeech?.('Focus off — I can chat again! 🐾', 2500);
+    }
+    syncUI();
+  }
+
+  function setPatrolMode(value) {
+    current.patrolMode = !!value;
+    if (current.patrolMode) current.focusMode = false;
+    save();
+    notifyChange('patrolMode');
+    notifyChange('focusMode');
+    window.MeowCat?.setFocusMode?.(current.focusMode);
+    if (current.patrolMode) {
+      window.MeowCat?.showSpeech?.('Patrol mode — I\'ll wander & play~ 🐾', 2500);
+    } else {
+      window.MeowCat?.showSpeech?.('Patrol off — back to cozy loaf~', 2500);
     }
     syncUI();
   }
@@ -131,6 +153,9 @@
     const focusToggle = panel.querySelector('#setting-focus');
     if (focusToggle) focusToggle.checked = current.focusMode;
 
+    const patrolToggle = panel.querySelector('#setting-patrol');
+    if (patrolToggle) patrolToggle.checked = current.patrolMode;
+
     const motionToggle = panel.querySelector('#setting-motion');
     if (motionToggle) motionToggle.checked = current.reducedMotion;
 
@@ -148,12 +173,19 @@
     panel.querySelectorAll('.feed-interval-btn').forEach((btn) => {
       btn.classList.toggle('active', Number(btn.dataset.mins) === current.feedIntervalMinutes);
     });
+
+    window.MeowProductivity?.syncWaterSettingsUi?.();
   }
 
   function bindCommonSettings(panel) {
     panel.querySelector('#setting-focus')?.addEventListener('change', (e) => {
       e.stopPropagation();
       setFocusMode(e.target.checked);
+    });
+
+    panel.querySelector('#setting-patrol')?.addEventListener('change', (e) => {
+      e.stopPropagation();
+      setPatrolMode(e.target.checked);
     });
 
     panel.querySelector('#setting-motion')?.addEventListener('change', (e) => {
@@ -186,6 +218,7 @@
         setFeedIntervalMinutes(Number(btn.dataset.mins));
       });
     });
+
   }
 
   function bindAgentSettings(panel) {
@@ -228,6 +261,15 @@
         </label>
       </div>
       <p class="settings-hint">Pauses walks, butterfly chases, feed reminders, and idle antics</p>
+
+      <div class="settings-row">
+        <label class="settings-label" for="setting-patrol">Patrol mode</label>
+        <label class="toggle">
+          <input type="checkbox" id="setting-patrol" ${current.patrolMode ? 'checked' : ''} />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <p class="settings-hint">Wander and play; no scheduled feed prompts (Focus = quiet; Patrol = active)</p>
 
       <div class="settings-row settings-col">
         <span class="settings-label">Activity level</span>
@@ -281,6 +323,7 @@
 
       <div class="settings-divider"></div>
       <p class="settings-section-title">Chat &amp; tasks</p>
+      <p class="settings-hint">Water reminders: Polen&rsquo;s panel &rarr; Remind tab</p>
       `;
     } else {
       panel.innerHTML = `
@@ -291,7 +334,16 @@
           <span class="toggle-slider"></span>
         </label>
       </div>
-      <p class="settings-hint">Pauses idle interruptions while you work</p>
+      <p class="settings-hint">Quiet paws — pauses idle interruptions (not the Focus session timer)</p>
+
+      <div class="settings-row">
+        <label class="settings-label" for="setting-patrol">Patrol mode</label>
+        <label class="toggle">
+          <input type="checkbox" id="setting-patrol" ${current.patrolMode ? 'checked' : ''} />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <p class="settings-hint">Wander and play; no scheduled feed prompts (Focus = quiet; Patrol = active)</p>
 
       <div class="settings-row settings-col">
         <span class="settings-label">Chatty level</span>
@@ -321,6 +373,7 @@
       </div>
 
       <div class="settings-divider"></div>
+      <p class="settings-hint">Water reminders: Polen&rsquo;s panel &rarr; Remind tab</p>
       `;
     }
 
@@ -352,6 +405,7 @@
     bindCommonSettings(panel);
     bindAgentSettings(panel);
     refreshAgentStatus();
+    window.MeowProductivity?.syncWaterSettingsUi?.();
   }
 
   function setAgentConfig(partial, retest = false) {
@@ -410,7 +464,6 @@
   }
 
   function init() {
-    load();
     applyVisuals();
     buildUI();
     notifyChange('all');
@@ -420,6 +473,7 @@
     get,
     load,
     setFocusMode,
+    setPatrolMode,
     setChattyLevel,
     setReducedMotion,
     setSnoozeDuration,

@@ -15,6 +15,8 @@ const Cat2Player = (() => {
   let stateCatEl = null;
   let reducedMotion = false;
   let soundsEnabled = true;
+  /** Volume for meow clip audio (0–1). */
+  const CLIP_AUDIO_VOLUME = 0.32;
   let rafId = null;
 
   const LOOP_END_WINDOW = 0.18;
@@ -633,7 +635,7 @@ const Cat2Player = (() => {
     if (!video) return;
     const audible = shouldPlayClipAudio(key);
     video.muted = !audible;
-    video.volume = audible ? 1 : 0;
+    video.volume = audible ? CLIP_AUDIO_VOLUME : 0;
   }
 
   function muteAllVideos() {
@@ -675,6 +677,8 @@ const Cat2Player = (() => {
     video.dataset.clipSrc = src;
     video.src = src;
     video.loop = !!clip.loop;
+    video.muted = true;
+    video.volume = 0;
     video.load();
     return clip;
   }
@@ -941,6 +945,9 @@ const Cat2Player = (() => {
   }
 
   function playOneShot(animName, durationMs = 600) {
+    if (!soundsEnabled && Cat2Clips.animationFor(animName) === 'meow') {
+      return;
+    }
     const key = Cat2Clips.animationFor(animName);
     switchClip(key, { crossfade: true });
 
@@ -981,6 +988,25 @@ const Cat2Player = (() => {
     };
   }
 
+  /** Seek active clip to a 0–1 progress fraction (used for walk edge reverse). */
+  function seekActiveClip(progress) {
+    const video = activeVideo();
+    if (!video || video.readyState < 2) return false;
+    const duration = video.duration;
+    if (!duration || !Number.isFinite(duration)) return false;
+    const p = Math.max(0, Math.min(0.98, Number(progress) || 0));
+    clipEndedDispatched = null;
+    lastPlaybackTime = -1;
+    playbackStalledAt = 0;
+    video.currentTime = p * duration;
+    if (!reducedMotion && video.paused) {
+      const playPromise = video.play();
+      if (playPromise?.catch) playPromise.catch(() => {});
+    }
+    renderVisible();
+    return true;
+  }
+
   function bindStateElement(catEl) {
     stateCatEl = catEl;
   }
@@ -993,6 +1019,7 @@ const Cat2Player = (() => {
     preloadClip,
     getCurrentKey,
     getPlaybackState,
+    seekActiveClip,
     isTransitioning,
     restartActiveClip,
     playOneShot,
@@ -1000,6 +1027,7 @@ const Cat2Player = (() => {
     bindStateElement,
     setReducedMotion,
     setSoundsEnabled,
+    areSoundsEnabled: () => soundsEnabled,
     stopRenderLoop,
     forceRecover,
   };

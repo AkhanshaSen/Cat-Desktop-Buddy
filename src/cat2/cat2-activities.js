@@ -31,7 +31,8 @@
 
     function canDoActivity() {
       return !ctx.isChatOpen() && !isAnimating() && !ctx.isSleeping &&
-        !ctx.breakAlertActive && !ctx.isFocusMode && !ctx.getSettings().focusMode;
+        !ctx.breakAlertActive && !ctx.isFocusMode && !ctx.getSettings().focusMode &&
+        !window.MeowProductivity?.shouldSuppressIdle?.();
     }
 
     function isPettingNow() {
@@ -471,6 +472,8 @@
       scratchStopPrompt?.classList.add('hidden');
       quickStopScratchBtn?.classList.add('hidden');
       catEl.classList.remove('scratch-active');
+      const quip = document.getElementById('scratch-quip');
+      if (quip) quip.textContent = '';
     }
 
     function detachScratchListener() {
@@ -507,8 +510,11 @@
       ctx.isBusy = true;
       ctx.animLock = true;
       catEl.dataset.playing = 'scratch';
-      ctx.setExpression('excited', { skipSync: true });
-      ctx.sayDialogue('scratch', 5500);
+      const scratchLine = ctx.pickDialogue?.('scratch') || { text: 'Mrow~', expression: 'excited' };
+      ctx.setExpression(scratchLine.expression || 'excited', { skipSync: true });
+      const quip = document.getElementById('scratch-quip');
+      if (quip) quip.textContent = scratchLine.text;
+      ctx.hideSpeech?.();
       showScratchStopPrompt();
       ctx.snapVideoClip();
       detachScratchListener();

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; media-src 'self'"
+    />
+    <title>&#8203;</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="panel-overlay-root">
+    <script src="panel-overlay-boot.js"></script>
+    <div id="app" class="panel-overlay-app">
+      <div id="buddy-stack" class="buddy-stack panel-overlay-stack">
+        <!-- Hub / pinned / timer / water bubble injected by productivity.js -->
+      </div>
+    </div>
+
+    <script src="personality.js"></script>
+    <script src="settings.js"></script>
+    <script src="productivity-logic.js"></script>
+    <script src="productivity.js"></script>
+    <script src="overlay-hit.js"></script>
+  </body>
+</html>

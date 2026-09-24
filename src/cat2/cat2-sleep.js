@@ -6,16 +6,29 @@
 
   function create(ctx) {
     const { catEl, CLIP_FLOW_MODE, feedState } = ctx;
+    const Walk = () => window.MeowWalkPlacement;
 
     function pickHorizontalDirection(placement) {
+      const helper = Walk();
+      if (helper) return helper.pickHorizontalDirection(placement, ctx.lastWalkDir);
       if (placement?.nearRight && !placement?.nearLeft) return -1;
       if (placement?.nearLeft && !placement?.nearRight) return 1;
       if (ctx.lastWalkDir) return -ctx.lastWalkDir;
       return Math.random() < 0.5 ? -1 : 1;
     }
 
+    function walkDistanceFallback() {
+      return 380 + Math.random() * 140;
+    }
+
     function maxHorizontalDistance(dir, placement) {
-      const fallback = 260 + Math.random() * 120;
+      const helper = Walk();
+      if (helper) {
+        return helper.maxHorizontalDistance(dir, placement, {
+          fallback: walkDistanceFallback(),
+        });
+      }
+      const fallback = walkDistanceFallback();
       if (!placement?.workArea) return fallback;
       const margin = 20;
       const { x, width, workArea } = placement;
@@ -34,6 +47,7 @@
     function stopClipMovement() {
       ctx.clipMovementStarted = false;
       ctx.clipMovementKey = null;
+      ctx.clipMovementDir = null;
       if (ctx.clipMoveRaf) {
         cancelAnimationFrame(ctx.clipMoveRaf);
         ctx.clipMoveRaf = null;
@@ -42,6 +56,7 @@
 
     function stopWalkMovement() {
       stopClipMovement();
+      ctx.walkReversedOnce = false;
     }
 
     function startSyncedClipMovement(clipKey, dir, opts = {}) {
@@ -49,12 +64,16 @@
       const clip = Cat2Clips.get(clipKey);
       const moveStart = opts.moveStart ?? clip.moveStart ?? 0;
       const moveEnd = opts.moveEnd ?? clip.moveEnd ?? 1;
-      const distance = opts.totalDistance ?? (320 + Math.random() * 180);
+      const distance = opts.totalDistance ?? (400 + Math.random() * 160);
       if (distance <= 0) return;
 
+      const allowReverse = !!opts.allowReverse;
       ctx.clipMovementStarted = true;
       ctx.clipMovementKey = clipKey;
+      ctx.clipMovementDir = dir;
       let appliedPx = 0;
+      let lastEdgeCheckAt = 0;
+      let reversing = false;
 
       const tick = () => {
         if (!ctx.clipMovementStarted || ctx.clipMovementKey !== clipKey) {
@@ -70,11 +89,51 @@
 
         const rawProgress = playback.currentTime / playback.duration;
         if (rawProgress >= moveEnd) {
+          // End walk when movement window ends — avoid "walking in place" anim tail
           stopClipMovement();
+          if (clipKey === 'walk' && ctx.isWalking) {
+            if (ctx.walkTimeout) { clearTimeout(ctx.walkTimeout); ctx.walkTimeout = null; }
+            finishWalk();
+          }
           return;
         }
         if (rawProgress < moveStart) {
           ctx.clipMoveRaf = requestAnimationFrame(tick);
+          return;
+        }
+
+        const now = Date.now();
+        if (allowReverse && !ctx.walkReversedOnce && !reversing && now - lastEdgeCheckAt > 250) {
+          lastEdgeCheckAt = now;
+          const helper = Walk();
+          window.meowAPI?.getWindowPlacement?.().then((placement) => {
+            if (!placement || !helper) return;
+            if (!ctx.clipMovementStarted || ctx.clipMovementKey !== clipKey) return;
+            if (ctx.walkReversedOnce || reversing) return;
+            const currentDir = ctx.clipMovementDir;
+            if (!helper.isBlockedHorizontally(placement, currentDir)) return;
+
+            reversing = true;
+            ctx.walkReversedOnce = true;
+            const remaining = Math.max(120, distance - Math.abs(appliedPx));
+            const nextDir = helper.flipDirection(currentDir);
+            stopClipMovement();
+            ctx.lastWalkDir = nextDir;
+            applyWalkFacing(nextDir);
+            ctx.walkPlacement = placement;
+            // Rewind to full move window so reverse travel still syncs to the clip
+            const clipMoveStart = clip.moveStart ?? 0;
+            Cat2Player.seekActiveClip?.(clipMoveStart);
+            startSyncedClipMovement(clipKey, nextDir, {
+              totalDistance: remaining,
+              allowReverse: false,
+              moveStart: clipMoveStart,
+              moveEnd: clip.moveEnd ?? moveEnd,
+            });
+          }).catch(() => {});
+        }
+
+        if (reversing || !ctx.clipMovementStarted || ctx.clipMovementKey !== clipKey) {
           return;
         }
 
@@ -87,22 +146,42 @@
           window.meowAPI?.dragWindow(step, 0);
         }
 
-        ctx.clipMoveRaf = requestAnimationFrame(tick);
+        if (ctx.clipMovementStarted && ctx.clipMovementKey === clipKey && !reversing) {
+          ctx.clipMoveRaf = requestAnimationFrame(tick);
+        }
       };
 
       ctx.clipMoveRaf = requestAnimationFrame(tick);
     }
 
     function startWalkMovement(dir) {
-      startSyncedClipMovement('walk', dir, {
-        totalDistance: maxHorizontalDistance(dir, ctx.walkPlacement),
+      let walkDir = dir;
+      let distance = maxHorizontalDistance(walkDir, ctx.walkPlacement);
+      if (distance <= 0) {
+        walkDir = Walk()?.flipDirection(walkDir) ?? -walkDir;
+        applyWalkFacing(walkDir);
+        ctx.lastWalkDir = walkDir;
+        distance = maxHorizontalDistance(walkDir, ctx.walkPlacement);
+      }
+      if (distance <= 0) return;
+      ctx.walkReversedOnce = false;
+      startSyncedClipMovement('walk', walkDir, {
+        totalDistance: distance,
+        allowReverse: true,
       });
     }
 
     function startButterflyMovement(dir) {
-      const distance = maxHorizontalDistance(dir, ctx.butterflyPlacement);
-      startSyncedClipMovement('butterfly', dir, {
+      let flyDir = dir;
+      let distance = maxHorizontalDistance(flyDir, ctx.butterflyPlacement);
+      if (distance <= 0) {
+        flyDir = Walk()?.flipDirection(flyDir) ?? -flyDir;
+        applyWalkFacing(flyDir);
+        distance = maxHorizontalDistance(flyDir, ctx.butterflyPlacement);
+      }
+      startSyncedClipMovement('butterfly', flyDir, {
         totalDistance: distance > 0 ? distance : 160,
+        allowReverse: false,
       });
     }
 
@@ -150,11 +229,16 @@
 
     function goToSleepClip(duration, { force = false } = {}) {
       if (!CLIP_FLOW_MODE) {
-        goToSleep(duration);
+        goToSleep(duration, { force });
         return true;
       }
-      if (ctx.isSleeping) return false;
-      if (feedState.isFlowActive() || ctx.isEating || feedState.isBegging()) return false;
+      if (ctx.isSleeping && !force) return false;
+      if (!force && (feedState.isFlowActive() || ctx.isEating || feedState.isBegging())) return false;
+      if (force) {
+        if (ctx.isEating) ctx.stopEating?.();
+        feedState.reset?.('focus-nap');
+        if (ctx.sleepTimeout) clearTimeout(ctx.sleepTimeout);
+      }
       if (!force && Date.now() < ctx.postMealCooldownUntil) return false;
       if (!force && !ctx.canPickActivity('sleep')) return false;
       if (!force && !ctx.canDoActivity()) return false;
@@ -209,10 +293,16 @@
       return true;
     }
 
-    function goToSleep(duration = 20000) {
+    function goToSleep(duration = 20000, { force = false } = {}) {
       if (CLIP_FLOW_MODE) return;
-      if (ctx.isSleeping || ctx.isEating || ctx.animLock || ctx.isChatOpen()) return;
-      ctx.stopActivity();
+      if (!force && (ctx.isSleeping || ctx.isEating || ctx.animLock || ctx.isChatOpen())) return;
+      if (force) {
+        if (ctx.isEating) ctx.stopEating?.();
+        ctx.stopActivity();
+        if (ctx.sleepTimeout) clearTimeout(ctx.sleepTimeout);
+      } else {
+        ctx.stopActivity();
+      }
       ctx.animLock = true;
       ctx.setPose('sleep');
       ctx.hideSpeech();
@@ -227,8 +317,18 @@
     }
 
     function onWalkClipVisible() {
+      if (catEl.dataset.waterChase === 'true') return;
       if (!ctx.isWalking || Cat2Player.getCurrentKey() !== 'walk') return;
       if (ctx.clipMovementStarted) return;
+      const dir = catEl.classList.contains('walking-left') ? -1 : 1;
+      startWalkMovement(dir);
+    }
+
+    /** Fallback when clip-visible is missed (e.g. same-key restart races). */
+    function ensureWalkMovementStarted() {
+      if (catEl.dataset.waterChase === 'true') return;
+      if (!ctx.isWalking || ctx.clipMovementStarted) return;
+      if (Cat2Player.getCurrentKey() !== 'walk') return;
       const dir = catEl.classList.contains('walking-left') ? -1 : 1;
       startWalkMovement(dir);
     }
@@ -241,19 +341,27 @@
       startButterflyMovement(dir);
     }
 
-    async function startWalk({ afterDecline = false } = {}) {
+    async function startWalk({ afterDecline = false, afterMeal = false } = {}) {
       if (ctx.isWalking) return false;
-      if (!afterDecline) {
+      const forceStart = afterDecline || afterMeal;
+      if (!forceStart) {
         if (!ctx.canDoActivity()) return false;
         if (Cat2Player.getCurrentKey() !== 'idle') return false;
         if (Cat2Player.isTransitioning?.()) return false;
+      }
+      if (afterMeal) {
+        if (ctx.isChatOpen()) return false;
+        if (ctx.breakAlertActive) return false;
+        if (window.MeowProductivity?.shouldSuppressIdle?.()) return false;
       }
 
       ctx.walkPlacement = await window.meowAPI?.getWindowPlacement?.() ?? null;
       const dir = pickHorizontalDirection(ctx.walkPlacement);
       ctx.lastWalkDir = dir;
+      ctx.walkReversedOnce = false;
 
-      stopWalk({ skipSync: afterDecline });
+      stopWalk({ skipSync: true });
+      stopWalkMovement();
 
       ctx.isWalking = true;
       ctx.isBusy = true;
@@ -262,10 +370,20 @@
       catEl.dataset.walking = 'true';
       applyWalkFacing(dir);
 
-      if (!afterDecline) ctx.sayDialogue('walkPatrol', 3500);
+      if (afterMeal) {
+        ctx.showSpeech?.('*stretch* little stroll~', 2800);
+      } else if (!afterDecline) {
+        ctx.sayDialogue('walkPatrol', 3500);
+      }
       ctx.setExpression('happy');
-      if (afterDecline) ctx.snapVideoClip();
-      else ctx.syncVideoClip();
+      // Force a fresh walk clip so every walk gets clip-visible + movement sync
+      if (CLIP_FLOW_MODE) {
+        Cat2Player.switchClip('walk', { crossfade: false, force: true });
+      } else if (forceStart) {
+        ctx.snapVideoClip();
+      } else {
+        ctx.syncVideoClip();
+      }
 
       detachWalkEndedListener();
       ctx.walkEndedListener = (ev) => {
@@ -282,7 +400,12 @@
         ctx.walkTimeout = null;
         finishWalk();
       });
-      ctx.cat2ActivityLog('start', 'walk', { afterDecline, dir });
+      // Safety: if clip-visible was missed, start movement on next frames
+      requestAnimationFrame(() => {
+        ensureWalkMovementStarted();
+        setTimeout(ensureWalkMovementStarted, 120);
+      });
+      ctx.cat2ActivityLog('start', 'walk', { afterDecline, afterMeal, dir });
       return true;
     }
 
@@ -305,6 +428,7 @@
       goToSleep,
       onWalkClipVisible,
       onButterflyClipVisible,
+      ensureWalkMovementStarted,
       startWalk,
     };
   }

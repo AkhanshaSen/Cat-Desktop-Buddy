@@ -1,7 +1,33 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('meowAPI', {
+  log: (...args) => {
+    ipcRenderer.send('meow:log', { role: 'renderer', args: args.map((a) => {
+      if (a == null) return String(a);
+      if (typeof a === 'object') {
+        try { return JSON.stringify(a); } catch (_) { return String(a); }
+      }
+      return String(a);
+    }) });
+  },
   getWindowPlacement: () => ipcRenderer.invoke('window:get-placement'),
+  getCursorPoint: () => ipcRenderer.invoke('cursor:get-point'),
+  getOverlayBounds: () => ipcRenderer.invoke('overlay:get-bounds'),
+  setIgnoreMouseEvents: (ignore) => {
+    ipcRenderer.send('overlay:set-ignore', { ignore: !!ignore });
+  },
+  broadcast: (channel, payload) => {
+    ipcRenderer.send('meow:broadcast', String(channel || ''), payload);
+  },
+  onBroadcast: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const handler = (_event, msg) => {
+      if (!msg || !msg.channel) return;
+      callback(msg.channel, msg.payload);
+    };
+    ipcRenderer.on('meow:broadcast', handler);
+    return () => ipcRenderer.removeListener('meow:broadcast', handler);
+  },
   dragWindow: (deltaX, deltaY) => {
     const dx = Math.round(Number(deltaX) || 0);
     const dy = Math.round(Number(deltaY) || 0);

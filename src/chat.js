@@ -1,12 +1,18 @@
 /**
- * Chat panel — dialog with Meow personality engine
+ * Chat panel — attached to the cat window (not the detached overlay).
  */
 (() => {
   const chatPanel = document.getElementById('chat-panel');
+  if (!chatPanel) return;
+  // Only run in the cat pet window
+  if (window.MEOW_PANEL_OVERLAY || document.body?.classList?.contains('panel-overlay-root')) return;
+
   const chatMessages = document.getElementById('chat-messages');
   const chatInput = document.getElementById('chat-input');
   const sendBtn = document.getElementById('send-btn');
   const closeChat = document.getElementById('close-chat');
+  const openHubPanelBtn = document.getElementById('open-hub-panel-btn');
+  const PROD_SETTINGS_KEY = 'meowProductivitySettings';
   const quickBtns = document.querySelectorAll('.quick-btn');
   const tabChat = document.getElementById('tab-chat');
   const tabLook = document.getElementById('tab-look');
@@ -16,32 +22,52 @@
   const chatBody = document.getElementById('chat-body');
 
   let isOpen = false;
+  /** Chat opened from hub — cat click toggles until user hits × */
+  let chatDocked = false;
   let greeted = false;
   let activeTab = 'chat';
   let historyRestored = false;
+  let hubPanelVisible = false;
+
+  function readHubPanelVisibleFromStorage() {
+    try {
+      const p = JSON.parse(localStorage.getItem(PROD_SETTINGS_KEY) || '{}');
+      return !!(p?.notesVisible || p?.tasksWidgetPinned);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function syncOpenHubPanelBtn() {
+    if (!openHubPanelBtn) return;
+    const show = isOpen && !hubPanelVisible;
+    openHubPanelBtn.classList.toggle('hidden', !show);
+  }
 
   const CHAT_HISTORY_KEY = 'meowChatHistory';
   const MAX_HISTORY = 20;
-
   const isCat2 = () => !!document.getElementById('cat2-canvas-a') ||
     document.getElementById('cat')?.classList.contains('cat2-mode');
   const CAT2_WINDOW_H = 460;
-  const COMPACT_SIZE = {
-    width: 220,
-    height: isCat2() ? CAT2_WINDOW_H : 240,
-  };
-  const CHAT_SIZE = { width: 220, height: isCat2() ? CAT2_WINDOW_H : 442 };
-  const LOOK_SIZE = { width: 220, height: 344 };
-  const SETTINGS_SIZE = { width: 220, height: isCat2() ? CAT2_WINDOW_H : 520 };
+  const COMPACT_H = isCat2() ? CAT2_WINDOW_H : 240;
+  const CHAT_H = isCat2() ? CAT2_WINDOW_H : 442;
+  const LOOK_H = 344;
+  const SETTINGS_H = isCat2() ? CAT2_WINDOW_H : 520;
 
-  function resizeWindow(size, anchorBottom = false) {
-    if (!window.meowAPI?.resizeWindow) return;
-    if (isCat2()) {
-      // Cat 2 keeps a fixed window height so opening chat never shifts the cat.
-      window.meowAPI.resizeWindow(size.width, CAT2_WINDOW_H, false);
-      return;
+  function syncLayout(height) {
+    const h = height || (isOpen
+      ? (activeTab === 'look' ? LOOK_H : activeTab === 'settings' ? SETTINGS_H : CHAT_H)
+      : COMPACT_H);
+    if (window.MeowProductivity?.applyWindowSize) {
+      // Cat-role applyWindowSize reads chat open state
+      window.MeowProductivity.applyWindowSize();
+    } else {
+      window.meowAPI?.resizeWindow?.(220, isCat2() ? CAT2_WINDOW_H : h, !isCat2());
     }
-    window.meowAPI.resizeWindow(size.width, size.height, anchorBottom);
+  }
+
+  function catExpr(expr) {
+    window.MeowCat?.setExpression?.(expr);
   }
 
   function loadChatHistory() {
@@ -69,15 +95,8 @@
     lookPanel?.classList.toggle('hidden', tab !== 'look');
     settingsPanel?.classList.toggle('hidden', tab !== 'settings');
     chatBody?.classList.toggle('hidden', tab !== 'chat');
-
-    if (tab === 'look' && lookPanel) {
-      resizeWindow(LOOK_SIZE, true);
-    } else if (tab === 'settings') {
-      resizeWindow(SETTINGS_SIZE, true);
-    } else {
-      resizeWindow(CHAT_SIZE, true);
-      chatInput?.focus();
-    }
+    if (tab === 'chat') chatInput?.focus();
+    syncLayout();
   }
 
   function restoreSessionMessages() {
@@ -85,13 +104,11 @@
     historyRestored = true;
     const hist = loadChatHistory();
     if (hist.length === 0) return;
-
     const recent = hist.slice(-5);
     const sep = document.createElement('div');
     sep.className = 'msg-session-sep';
     sep.textContent = '— last session —';
     chatMessages.appendChild(sep);
-
     recent.forEach((m) => {
       const div = document.createElement('div');
       div.className = `msg ${m.role}`;
@@ -101,41 +118,50 @@
     chatMessages.scrollTop = chatMessages.scrollHeight;
   }
 
-  function openChat() {
+  function openChat(tab = 'chat', { dock = true } = {}) {
+    window.meowAPI?.log?.('openChat (cat-attached)', tab);
     isOpen = true;
+    if (dock) chatDocked = true;
     chatPanel.classList.remove('hidden');
-    window.MeowCat.hideSpeech();
-    const petting = window.MeowCat.isPetting?.();
-    const feedPending = window.MeowCat.isAwaitingFoodChoice?.() ||
+    window.MeowCat?.hideSpeech?.();
+    const petting = window.MeowCat?.isPetting?.();
+    const feedPending = window.MeowCat?.isAwaitingFoodChoice?.() ||
       document.getElementById('cat')?.dataset.begging === 'true';
-    if (!petting) {
-      if (window.MeowCat.wakeUp) window.MeowCat.wakeUp();
-      if (!feedPending && window.MeowCat.stopEating) window.MeowCat.stopEating();
-      if (window.MeowCat.stopWalk) window.MeowCat.stopWalk();
-      if (!feedPending && window.MeowCat.stopActivity) window.MeowCat.stopActivity();
+    if (!petting && window.MeowCat) {
+      window.MeowCat.wakeUp?.();
+      if (!feedPending) window.MeowCat.stopEating?.();
+      window.MeowCat.stopWalk?.();
+      if (!feedPending) window.MeowCat.stopActivity?.();
     }
-    if (!feedPending && window.MeowCat.hideFoodChoice) window.MeowCat.hideFoodChoice();
-    if (feedPending) window.MeowCat.refreshFeedPromptAfterChat?.();
-    switchTab('chat');
+    if (!feedPending) window.MeowCat?.hideFoodChoice?.();
+    if (feedPending) {
+      document.getElementById('food-choice')?.classList.add('hidden');
+      document.getElementById('cat')?.classList.remove('feed-prompt-open');
+    }
+    switchTab(tab === 'settings' ? 'settings' : tab === 'look' ? 'look' : 'chat');
+    hubPanelVisible = readHubPanelVisibleFromStorage();
+    syncOpenHubPanelBtn();
+    syncLayout();
 
-    if (!greeted) {
+    if (!greeted && tab !== 'settings') {
       greeted = true;
       restoreSessionMessages();
       addMessage('meow', "Hi friend! 🐱 How's your day going? I'm all ears!", false);
-      if (!petting) window.MeowCat.setExpression('happy');
+      if (!petting) catExpr('happy');
     }
   }
 
-  function closeChatPanel() {
+  function closeChatPanel({ dismiss = false } = {}) {
+    window.meowAPI?.log?.('closeChat (cat-attached)', { dismiss });
     isOpen = false;
+    if (dismiss) chatDocked = false;
     chatPanel.classList.add('hidden');
-    resizeWindow(COMPACT_SIZE, true);
-    const feedPending = window.MeowCat.isAwaitingFoodChoice?.() ||
-      window.MeowCat.isFeedBegging?.() ||
+    syncOpenHubPanelBtn();
+    syncLayout(COMPACT_H);
+    const feedPending = window.MeowCat?.isAwaitingFoodChoice?.() ||
+      window.MeowCat?.isFeedBegging?.() ||
       document.getElementById('cat')?.dataset.begging === 'true';
-    if (feedPending) {
-      window.MeowCat.refreshFeedPromptAfterChat?.();
-    }
+    if (feedPending) window.MeowCat?.refreshFeedPromptAfterChat?.();
   }
 
   function addMessage(role, text, persist = true) {
@@ -158,34 +184,30 @@
   }
 
   function removeTypingIndicator() {
-    const el = document.getElementById('typing-indicator');
-    if (el) el.remove();
+    document.getElementById('typing-indicator')?.remove();
   }
 
   function renderResponse(response, fromAgent) {
     removeTypingIndicator();
     addMessage('meow', response.text);
-    window.MeowCat.setExpression(response.expression || 'happy');
-
+    catExpr(response.expression || 'happy');
     if (fromAgent) {
-      if (response.actionTaken) window.MeowCat.bounce();
+      if (response.actionTaken) window.MeowCat?.bounce?.();
     } else if (response.sentiment === 'good' || response.sentiment === 'motivate') {
-      window.MeowCat.wiggle();
+      window.MeowCat?.wiggle?.();
     } else if (response.sentiment === 'love' || response.sentiment === 'cute') {
-      window.MeowCat.bounce();
+      window.MeowCat?.bounce?.();
     }
   }
 
   async function typeAndRespond(userText) {
     addMessage('user', userText);
     chatInput.value = '';
-
-    window.MeowCat.setExpression('thinking');
-    window.MeowCat.blink();
+    catExpr('thinking');
+    window.MeowCat?.blink?.();
     addTypingIndicator();
 
     const minDelay = new Promise((r) => setTimeout(r, 400 + Math.random() * 400));
-
     let agentResponse = null;
     if (window.meowAPI?.agentChat) {
       try {
@@ -195,25 +217,27 @@
         console.error('Meow agent error:', err);
       }
     }
-
     await minDelay;
 
     try {
       if (agentResponse && agentResponse.text) {
         renderResponse(agentResponse, true);
+      } else if (window.MeowPersonality?.respond) {
+        renderResponse(window.MeowPersonality.respond(userText), false);
       } else {
-        renderResponse(MeowPersonality.respond(userText), false);
+        removeTypingIndicator();
+        addMessage('meow', '*confused meow* Try again? 🐾');
       }
     } catch (err) {
       console.error('Meow response error:', err);
       removeTypingIndicator();
-      addMessage('meow', "*confused meow* My brain hiccuped! Try again? 🐾");
-      window.MeowCat.setExpression('sad');
+      addMessage('meow', '*confused meow* My brain hiccuped! Try again? 🐾');
+      catExpr('sad');
     }
   }
 
   function sendMessage() {
-    const text = chatInput.value.trim();
+    const text = chatInput?.value?.trim();
     if (!text) return;
     window.dispatchEvent(new CustomEvent('meow:chat-send', { detail: { text } }));
     typeAndRespond(text);
@@ -222,55 +246,76 @@
   tabChat?.addEventListener('click', (e) => { e.stopPropagation(); switchTab('chat'); });
   tabLook?.addEventListener('click', (e) => { e.stopPropagation(); switchTab('look'); });
   tabSettings?.addEventListener('click', (e) => { e.stopPropagation(); switchTab('settings'); });
-
-  sendBtn.addEventListener('click', sendMessage);
-
-  chatInput.addEventListener('keydown', (e) => {
+  sendBtn?.addEventListener('click', (e) => { e.stopPropagation(); sendMessage(); });
+  chatInput?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') sendMessage();
     e.stopPropagation();
   });
-
-  closeChat.addEventListener('click', (e) => {
+  openHubPanelBtn?.addEventListener('click', (e) => {
     e.stopPropagation();
-    const feedPending = window.MeowCat.isAwaitingFoodChoice?.() ||
-      window.MeowCat.isFeedBegging?.() ||
-      document.getElementById('cat')?.dataset.begging === 'true';
-    closeChatPanel();
-    if (!feedPending) {
-      window.MeowCat.setExpression('happy');
-      window.MeowCat.showSpeech('Mrow! Come back anytime~ 🐾', 3000);
-    }
+    window.meowAPI?.log?.('chat header → hub:open');
+    window.meowAPI?.broadcast?.('hub:open', { tab: 'tasks' });
   });
+
+  window.addEventListener('meow:hub-visibility', (ev) => {
+    hubPanelVisible = !!(ev.detail?.showHub || ev.detail?.showPinned);
+    syncOpenHubPanelBtn();
+  });
+
+  closeChat?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeChatPanel({ dismiss: true });
+    catExpr('happy');
+    window.MeowCat?.showSpeech?.('Mrow! Come back anytime~ 🐾', 3000);
+  });
+
+  function toggleChatPanel() {
+    if (isOpen) closeChatPanel({ dismiss: false });
+    else openChat(activeTab, { dock: true });
+  }
 
   quickBtns.forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (btn.dataset.action === 'stop-scratch') return;
       const prompt = btn.dataset.prompt;
+      if (!prompt) return;
       if (prompt === 'How was your day?') {
         typeAndRespond("Hey Meow, how should I tell you about my day?");
         setTimeout(() => {
           addMessage('meow', "Just tell meow however you feel! Good, okay, bad — I'm here for all of it~ ☀️");
         }, 1200);
       } else if (prompt === 'I need motivation') {
-        typeAndRespond("I need some motivation please");
+        typeAndRespond('I need some motivation please');
       } else if (prompt === 'Tell me something cute') {
-        typeAndRespond("Tell me something cute!");
+        typeAndRespond('Tell me something cute!');
+      } else {
+        typeAndRespond(prompt);
       }
     });
   });
 
-  window.addEventListener('meow:click', () => {
-    if (isOpen) {
-      closeChatPanel();
-    } else {
-      openChat();
-    }
+  document.getElementById('quick-tasks-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeChatPanel();
+    window.meowAPI?.broadcast?.('hub:open', { tab: 'tasks' });
   });
 
-  document.addEventListener('click', (e) => {
-    if (!isOpen) return;
-    if (!chatPanel.contains(e.target) && !document.getElementById('cat-container').contains(e.target)) {
-      closeChatPanel();
-    }
+  document.getElementById('quick-focus-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeChatPanel();
+    window.meowAPI?.broadcast?.('hub:open', { tab: 'focus' });
   });
+
+  window.addEventListener('meow:open-chat', (ev) => {
+    openChat(ev.detail?.tab || 'chat');
+  });
+
+  window.MeowChat = {
+    open: openChat,
+    close: closeChatPanel,
+    toggle: toggleChatPanel,
+    isOpen: () => isOpen,
+    isDocked: () => chatDocked,
+  };
 })();

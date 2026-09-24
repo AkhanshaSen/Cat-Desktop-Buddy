@@ -35,6 +35,7 @@
   let isBusy = false;
   let isWalking = false;
   let walkInterval = null;
+  let lastWalkDir = 0;
   let foodMood = null;        // 'good' | 'grumpy' | null
   let foodMoodTimeout = null;
   let awaitingFoodChoice = false;
@@ -84,6 +85,9 @@
     '👆 Right-click → hide',
     '× near ear → quit',
     '⏰ 2 hrs work → break nudge',
+    '📝 Chat → Tasks for Today list',
+    '⏱ Double-click → focus session',
+    '💧 Settings → water reminders',
     '🐟 Bowl cooldown: 5 min',
     '👀 Eyes follow cursor',
     '👗 Chat → change my look',
@@ -493,41 +497,85 @@
     scheduleEyeUpdate();
   }
 
-  function startWalk() {
-    if (!canDoActivity()) return;
+  async function startWalk(opts = {}) {
+    const afterMeal = !!opts.afterMeal;
+    if (afterMeal) {
+      if (isChatOpen() || isSleeping || isEating || isPetting || breakAlertActive) return;
+      if (window.MeowProductivity?.shouldSuppressIdle?.()) return;
+    } else if (!canDoActivity()) {
+      return;
+    }
     stopWalk();
 
     isWalking = true;
     isBusy = true;
     animLock = true;
 
-    const goLeft = Math.random() < 0.5;
-    const dir = goLeft ? -1 : 1;
-    catEl.classList.add(goLeft ? 'walking-left' : 'walking-right');
+    const Walk = window.MeowWalkPlacement;
+    let placement = null;
+    try {
+      placement = await window.meowAPI?.getWindowPlacement?.() ?? null;
+    } catch (_) { /* ignore */ }
 
-    const speechIdx = Math.floor(Math.random() * 3);
-    const walkSpeech = [
-      'Patrol time~ 🐾', '*sniff sniff* exploring!', 'Just going for a walk~',
-    ][speechIdx];
-    showSpeech(walkSpeech, 3000);
-    setExpression('curious' in window ? 'happy' : 'happy');
+    let dir = Walk
+      ? Walk.pickHorizontalDirection(placement, lastWalkDir)
+      : (Math.random() < 0.5 ? -1 : 1);
+    lastWalkDir = dir;
+    catEl.classList.remove('walking-left', 'walking-right');
+    catEl.classList.add(dir === -1 ? 'walking-left' : 'walking-right');
 
-    const stepPx = 2;
-    const stepMs = 60;
-    const walkDuration = 4000 + Math.random() * 4000;
+    const walkSpeech = afterMeal
+      ? ['*stretch* little stroll~', 'Digest walk~ 🐾', '*sniff* post-nom patrol!']
+      : [
+        'Patrol time~ 🐾', '*sniff sniff* exploring!', 'Just going for a walk~',
+      ];
+    showSpeech(walkSpeech[Math.floor(Math.random() * walkSpeech.length)], 3000);
+    setExpression('happy');
+
+    const stepPx = 3;
+    const stepMs = 55;
+    const walkDuration = afterMeal
+      ? 3200 + Math.random() * 1800
+      : 5500 + Math.random() * 4500;
+
+    let stepCount = 0;
+    let placementCache = placement;
+
+    const refreshPlacement = () => {
+      window.meowAPI?.getWindowPlacement?.().then((p) => {
+        if (p) placementCache = p;
+      }).catch(() => {});
+    };
 
     walkInterval = setInterval(() => {
       if (isChatOpen() || isSleeping || isEating || isPetting || breakAlertActive) {
         stopWalk();
         return;
       }
+      if (window.MeowProductivity?.shouldSuppressIdle?.() && !afterMeal) {
+        stopWalk();
+        return;
+      }
+
+      stepCount += 1;
+      if (stepCount % 3 === 0) refreshPlacement();
+
+      if (Walk && placementCache && Walk.isBlockedHorizontally(placementCache, dir)) {
+        dir = Walk.flipDirection(dir);
+        lastWalkDir = dir;
+        catEl.classList.remove('walking-left', 'walking-right');
+        catEl.classList.add(dir === -1 ? 'walking-left' : 'walking-right');
+      }
+
       window.meowAPI?.dragWindow(dir * stepPx, 0);
     }, stepMs);
 
     setTimeout(() => {
       stopWalk();
       if (!isChatOpen()) {
-        const arrived = ['*sniff* interesting spot~', 'Ah, good spot. 😌', '*looks around*'];
+        const arrived = afterMeal
+          ? ['*purr* good stretch~', 'Back to loaf~', '*looks around*']
+          : ['*sniff* interesting spot~', 'Ah, good spot. 😌', '*looks around*'];
         showSpeech(arrived[Math.floor(Math.random() * arrived.length)], 2500);
         playAnimation('sniff', 500);
         setTimeout(() => playAnimation('headTiltL', 450), 600);
@@ -669,6 +717,13 @@
         setTimeout(() => playAnimation('shakeHead', 400), 500);
       }
       showSpeech(reaction, 5000);
+
+      setTimeout(() => {
+        if (isChatOpen() || breakAlertActive) return;
+        if (window.MeowProductivity?.shouldSuppressIdle?.()) return;
+        if (isSleeping || isEating || isPetting || isWalking) return;
+        startWalk({ afterMeal: true });
+      }, 700);
     }, 5000);
   }
 
@@ -694,9 +749,17 @@
     return true;
   }
 
-  function goToSleep(duration = 20000) {
-    if (isSleeping || isEating || animLock || isChatOpen()) return;
-    stopActivity();
+  function goToSleep(duration = 20000, { force = false } = {}) {
+    if (!force && (isSleeping || isEating || animLock || isChatOpen())) return;
+    if (force) {
+      if (isEating) stopEating();
+      stopWalk();
+      stopActivity();
+      if (sleepTimeout) clearTimeout(sleepTimeout);
+      if (isChatOpen()) return;
+    } else {
+      stopActivity();
+    }
     animLock = true;
     setPose('sleep');
     hideSpeech();
@@ -796,6 +859,7 @@
     const tick = () => {
       const settings = getSettings();
       if (settings.focusMode || isFocusMode) return;
+      if (window.MeowProductivity?.shouldSuppressIdle?.()) return;
       if (isChatOpen() || isSleeping || isEating || isPetting || breakAlertActive || awaitingFoodChoice) return;
 
       const level = settings.chattyLevel || 'normal';
@@ -810,13 +874,25 @@
       }
 
       const roll = Math.random();
+      const patrol = !!settings.patrolMode || window.MeowProductivity?.isPatrolModeActive?.();
 
-      if (level === 'quiet') {
+      if (level === 'quiet' && !patrol) {
         if (!isBusy && !animLock && roll < 0.25) {
           startRandomActivity();
         } else if (!isBusy && !animLock && roll < 0.4) {
           goToSleep(15000 + Math.random() * 10000);
         } else if (!isBusy && roll < 0.55) {
+          playRandomAnimation();
+        }
+        return;
+      }
+
+      if (patrol) {
+        if (!isBusy && !animLock && roll < 0.55) {
+          startWalk();
+        } else if (!isBusy && !animLock && roll < 0.8) {
+          startRandomActivity();
+        } else if (!isBusy && roll < 0.92) {
           playRandomAnimation();
         }
         return;
@@ -897,7 +973,10 @@
     buddyStack()?.classList.remove('break-glow');
     window.meowAPI?.dismissBreakReminder();
     if (catEl.dataset.expression === 'excited') setExpression('happy');
-    if (!isChatOpen()) window.meowAPI?.resizeWindow(220, COMPACT_H, true);
+    if (!isChatOpen()) {
+      if (window.MeowProductivity?.applyWindowSize) window.MeowProductivity.applyWindowSize();
+      else window.meowAPI?.resizeWindow(220, COMPACT_H, true);
+    }
   }
 
   function buddyStack() {
@@ -1041,9 +1120,16 @@
 
   catFigure.addEventListener('click', (e) => {
     if (e.target.closest('.pet-zone') || e.target.closest('#food-bowl') || e.target.closest('.quit-x') || e.target.closest('.focus-badge')) return;
+    if (e.target.closest('#notes-panel') || e.target.closest('#productivity-hub') ||
+        e.target.closest('#pinned-tasks-widget') ||
+        e.target.closest('#focus-session-modal') || e.target.closest('#focus-timer-widget') ||
+        e.target.closest('#water-chase-bubble')) return;
     if (hasMoved) return;
     e.stopPropagation();
-    if (wakeUp()) return;
+    if (wakeUp()) {
+      window.dispatchEvent(new CustomEvent('meow:click'));
+      return;
+    }
     if (isEating) {
       stopEating();
       showSpeech('Mrow? More food later~', 2000);
@@ -1052,13 +1138,34 @@
     stopWalk();
     stopActivity();
     bounce();
+    if (e.shiftKey || e.altKey) {
+      if (window.MeowChat?.isDocked?.()) {
+        window.dispatchEvent(new CustomEvent('meow:click'));
+        return;
+      }
+      window.meowAPI?.broadcast?.('hub:open', { tab: 'focus' });
+      window.dispatchEvent(new CustomEvent('meow:open-focus-session'));
+      return;
+    }
     window.dispatchEvent(new CustomEvent('meow:click'));
+  });
+
+  catFigure.addEventListener('dblclick', (e) => {
+    if (e.target.closest('.pet-zone') || e.target.closest('#food-bowl') || e.target.closest('.quit-x')) return;
+    e.stopPropagation();
+    e.preventDefault();
+    if (window.MeowChat?.isDocked?.()) return;
+    window.dispatchEvent(new CustomEvent('meow:open-focus-session'));
   });
 
   catContainer.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     if (e.target.closest('.quit-x') || e.target.closest('.focus-badge') || e.target.closest('.chat-panel') ||
-        e.target.closest('#food-bowl') || e.target.closest('.pet-zone')) return;
+        e.target.closest('#food-bowl') || e.target.closest('.pet-zone') ||
+        e.target.closest('#notes-panel') || e.target.closest('#productivity-hub') ||
+        e.target.closest('#pinned-tasks-widget') ||
+        e.target.closest('#focus-session-modal') || e.target.closest('#focus-timer-widget') ||
+        e.target.closest('#focus-countdown-bar') || e.target.closest('#water-chase-bubble')) return;
     closeContextMenu();
     dragPending = true;
     hasMoved = false;
@@ -1129,7 +1236,35 @@
     const settings = e.detail?.settings;
     if (!settings) return;
     if (typeof settings.focusMode === 'boolean') setFocusMode(settings.focusMode);
-    if (e.detail?.key === 'chattyLevel' || e.detail?.key === 'all') restartIdleLoop();
+    if (e.detail?.key === 'chattyLevel' || e.detail?.key === 'patrolMode' || e.detail?.key === 'all') {
+      restartIdleLoop();
+    }
+  });
+
+  let waterChaseWalk = false;
+  window.addEventListener('meow:water-chase', (ev) => {
+    const active = !!ev.detail?.active;
+    if (active) {
+      waterChaseWalk = true;
+      stopWalk();
+      stopActivity();
+      catEl.classList.remove('walking-left', 'walking-right');
+      catEl.classList.add('walking-right');
+    } else if (waterChaseWalk) {
+      waterChaseWalk = false;
+      catEl.classList.remove('walking-left', 'walking-right');
+    }
+  });
+  window.addEventListener('meow:water-chase-face', (ev) => {
+    if (!waterChaseWalk) return;
+    const dir = ev.detail?.dir === -1 ? -1 : 1;
+    catEl.classList.remove('walking-left', 'walking-right');
+    catEl.classList.add(dir === -1 ? 'walking-left' : 'walking-right');
+  });
+
+  window.addEventListener('meow:focus-session', (ev) => {
+    if (ev.detail?.active) return;
+    if (isSleeping) wakeUp();
   });
 
   if (window.meowAPI?.onBreakReminder) {
@@ -1171,7 +1306,7 @@
 
   window.MeowCat = {
     setExpression, setPose, bounce, wiggle,
-    showSpeech, hideSpeech, blink, wakeUp, stopEating,
+    showSpeech, hideSpeech, blink, wakeUp, stopEating, goToSleep,
     playAnimation, playRandomAnimation, triggerBreakAlert,
     stopActivity, startRandomActivity, stopWalk, startWalk, begForFood,
     showFoodChoice, hideFoodChoice, setFocusMode, snoozeBreak,

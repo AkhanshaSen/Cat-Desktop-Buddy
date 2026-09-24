@@ -12,6 +12,8 @@
     "stop": "node scripts/stop.js",
     "test:gemini": "node scripts/test-gemini.js",
     "test:commands": "node scripts/test-commands.js",
+    "test:productivity": "node scripts/test-productivity.js",
+    "test:walk-placement": "node scripts/test-walk-placement.js",
     "generate:cat2-clips": "node scripts/generate-cat2-placeholders.js",
     "process:cat2-food": "node scripts/process-cat2-food-clips.js",
     "test:cat2-walk": "node scripts/test-cat2-walk-sync.js",
@@ -43,10 +45,12 @@
       "src/**/*",
       "main/**/*",
       "assets/clips/**/*",
+      "assets/sounds/**/*",
       "package.json"
     ],
     "asarUnpack": [
-      "assets/clips/**/*"
+      "assets/clips/**/*",
+      "assets/sounds/**/*"
     ],
     "extraMetadata": {
       "main": "launcher-main.js"

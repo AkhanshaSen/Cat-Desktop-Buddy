@@ -96,6 +96,7 @@
       if (catEl.dataset.begging !== 'true' && !feedState.isHungry()) return false;
       if (feedState.isAwaitingChoice()) return true;
       if (ctx.isEating || ctx.isSleeping) return false;
+      if (ctx.isChatOpen?.()) return false;
 
       feedState.openPrompt();
       ctx.hideSpeech();
@@ -109,6 +110,7 @@
     function ensureFeedPromptVisible() {
       if (!CLIP_FLOW_MODE) return false;
       if (ctx.isEating || ctx.isSleeping) return false;
+      if (ctx.isChatOpen?.()) return false;
 
       const uiVisible = foodChoice && !foodChoice.classList.contains('hidden');
       if (catEl.dataset.begging !== 'true' && !feedState.isAwaitingChoice() && !uiVisible) {
@@ -160,6 +162,11 @@
       ctx.feedScheduleTimeout = null;
       if (ctx.getSettings().focusMode || ctx.isFocusMode) {
         rescheduleFeedTimeout(2000);
+        return;
+      }
+      if (ctx.getSettings().patrolMode || window.MeowProductivity?.isPatrolModeActive?.()) {
+        // Patrol: wander only — no scheduled feed prompts
+        rescheduleFeedTimeout(ctx.getFeedIntervalMs());
         return;
       }
       if (ctx.isEating) {
@@ -546,6 +553,13 @@
       ctx.setExpression('happy', { skipSync: true });
       ctx.snapVideoClip();
       onFeedCycleComplete();
+
+      setTimeout(() => {
+        if (ctx.isChatOpen?.() || ctx.breakAlertActive) return;
+        if (window.MeowProductivity?.shouldSuppressIdle?.()) return;
+        if (ctx.isSleeping || ctx.isEating || ctx.isWalking) return;
+        ctx.startWalk?.({ afterMeal: true });
+      }, 700);
     }
 
     function feedCat(foodType) {
@@ -609,6 +623,12 @@
         ctx.showSpeech(ctx.postMealMeta.reaction, 5000);
         ctx.postMealMeta = null;
         onFeedCycleComplete();
+        setTimeout(() => {
+          if (ctx.isChatOpen?.() || ctx.breakAlertActive) return;
+          if (window.MeowProductivity?.shouldSuppressIdle?.()) return;
+          if (ctx.isSleeping || ctx.isEating || ctx.isWalking) return;
+          ctx.startWalk?.({ afterMeal: true });
+        }, 700);
       };
 
       const armEatTimeout = () => {

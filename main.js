@@ -11,6 +11,7 @@ if (IS_CAT2) {
 }
 
 let catWindow = null;
+let panelOverlayWindow = null;
 let tray = null;
 let catWindowTargetSize = { width: 220, height: 240 };
 let catWindowDragging = false;
@@ -306,6 +307,7 @@ function createCatWindow() {
   const bottomMargin = 20;
   catWindowTargetSize = { width: CAT_WINDOW_WIDTH, height: winHeight };
 
+  console.log('[Meow:main] createCatWindow', { w: CAT_WINDOW_WIDTH, h: winHeight });
   catWindow = new BrowserWindow({
     width: 220,
     height: winHeight,
@@ -347,16 +349,121 @@ function createCatWindow() {
 
   catWindow.on('closed', () => {
     catWindow = null;
+    if (panelOverlayWindow && !panelOverlayWindow.isDestroyed()) {
+      panelOverlayWindow.close();
+    }
   });
+}
+
+function getPrimaryWorkArea() {
+  return screen.getPrimaryDisplay().workArea;
+}
+
+function syncPanelOverlayBounds() {
+  if (!panelOverlayWindow || panelOverlayWindow.isDestroyed()) return;
+  const area = getPrimaryWorkArea();
+  panelOverlayWindow.setBounds({
+    x: area.x,
+    y: area.y,
+    width: area.width,
+    height: area.height,
+  }, false);
+}
+
+function createPanelOverlayWindow() {
+  const area = getPrimaryWorkArea();
+  console.log('[Meow:main] createPanelOverlayWindow', area);
+  panelOverlayWindow = new BrowserWindow({
+    x: area.x,
+    y: area.y,
+    width: area.width,
+    height: area.height,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    focusable: true,
+    title: WIN32_EMPTY_TITLE,
+    ...(process.platform === 'win32' && {
+      maximizable: false,
+      minimizable: false,
+      fullscreenable: false,
+    }),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  if (process.platform === 'win32') {
+    applyWin32FramelessFixes(panelOverlayWindow);
+  }
+
+  panelOverlayWindow.setIgnoreMouseEvents(true, { forward: true });
+  panelOverlayWindow.loadFile(path.join(__dirname, 'src', 'index-panels.html'));
+  panelOverlayWindow.webContents.on('did-finish-load', () => {
+    console.log('[Meow:main] overlay did-finish-load', panelOverlayWindow.webContents.getURL());
+  });
+  panelOverlayWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    console.error('[Meow:main] overlay did-fail-load', code, desc, url);
+  });
+  panelOverlayWindow.webContents.on('console-message', (_e, level, message) => {
+    if (String(message).includes('[Meow')) return; // already logged via ipc
+    if (level >= 2) console.log('[Meow:overlay-console]', message);
+  });
+
+  if (process.platform === 'darwin') {
+    panelOverlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  }
+
+  // Keep cat above the overlay when both are visible
+  panelOverlayWindow.on('show', () => {
+    if (catWindow && !catWindow.isDestroyed()) {
+      catWindow.moveTop();
+    }
+  });
+
+  panelOverlayWindow.on('closed', () => {
+    panelOverlayWindow = null;
+  });
+}
+
+function broadcastToWindows(channel, payload) {
+  const msg = { channel: String(channel || ''), payload };
+  for (const win of [catWindow, panelOverlayWindow]) {
+    if (win && !win.isDestroyed()) {
+      console.log('[Meow:main] send→', win === catWindow ? 'cat' : 'overlay', channel);
+      win.webContents.send('meow:broadcast', msg);
+    } else {
+      console.log('[Meow:main] skip send', win === catWindow ? 'cat' : 'overlay', 'missing');
+    }
+  }
+}
+
+function windowFromEvent(event) {
+  const wc = event?.sender;
+  if (!wc) return null;
+  return BrowserWindow.fromWebContents(wc);
 }
 
 function toggleCatWindow() {
   if (!catWindow) return;
   if (catWindow.isVisible()) {
     catWindow.hide();
+    if (panelOverlayWindow && !panelOverlayWindow.isDestroyed()) {
+      panelOverlayWindow.hide();
+    }
   } else {
+    if (panelOverlayWindow && !panelOverlayWindow.isDestroyed()) {
+      panelOverlayWindow.show();
+    }
     catWindow.show();
     catWindow.focus();
+    catWindow.moveTop();
   }
 }
 
@@ -370,9 +477,13 @@ function createTray() {
     {
       label: IS_CAT2 ? 'Show Meow 2' : 'Show Meow',
       click: () => {
+        if (panelOverlayWindow && !panelOverlayWindow.isDestroyed()) {
+          panelOverlayWindow.show();
+        }
         if (catWindow) {
           catWindow.show();
           catWindow.focus();
+          catWindow.moveTop();
         }
       },
     },
@@ -380,6 +491,9 @@ function createTray() {
       label: IS_CAT2 ? 'Hide Meow 2' : 'Hide Meow',
       click: () => {
         if (catWindow) catWindow.hide();
+        if (panelOverlayWindow && !panelOverlayWindow.isDestroyed()) {
+          panelOverlayWindow.hide();
+        }
       },
     },
     { type: 'separator' },
@@ -399,6 +513,7 @@ function createTray() {
 }
 
 ipcMain.on('window-drag', (_event, payload = {}) => {
+  // Always move the cat pet window (chase + user drag), never the overlay
   moveCatWindow(payload.deltaX, payload.deltaY);
 });
 
@@ -415,16 +530,60 @@ ipcMain.on('window-drag-end', () => {
 
 ipcMain.handle('window:get-placement', () => getCatWindowPlacement());
 
+ipcMain.handle('cursor:get-point', () => {
+  const point = screen.getCursorScreenPoint();
+  return { x: point.x, y: point.y };
+});
+
+ipcMain.handle('overlay:get-bounds', () => {
+  if (panelOverlayWindow && !panelOverlayWindow.isDestroyed()) {
+    const b = panelOverlayWindow.getBounds();
+    return { x: b.x, y: b.y, width: b.width, height: b.height };
+  }
+  const area = getPrimaryWorkArea();
+  return { x: area.x, y: area.y, width: area.width, height: area.height };
+});
+
+ipcMain.on('overlay:set-ignore', (event, payload = {}) => {
+  const win = windowFromEvent(event);
+  if (!win || win.isDestroyed()) return;
+  const ignore = payload.ignore !== false;
+  try {
+    if (ignore) {
+      win.setIgnoreMouseEvents(true, { forward: true });
+    } else {
+      win.setIgnoreMouseEvents(false);
+    }
+  } catch (_) { /* ignore */ }
+});
+
+ipcMain.on('meow:log', (event, payload = {}) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const role = payload.role || (win === panelOverlayWindow ? 'overlay' : win === catWindow ? 'cat' : 'renderer');
+  const args = Array.isArray(payload.args) ? payload.args : [payload];
+  console.log(`[Meow:${role}]`, ...args);
+});
+
+ipcMain.on('meow:broadcast', (_event, channel, payload) => {
+  console.log('[Meow:main] broadcast', channel, payload ?? '');
+  broadcastToWindows(channel, payload);
+});
+
 ipcMain.on('window-minimize', () => {
   if (catWindow) catWindow.hide();
+  if (panelOverlayWindow && !panelOverlayWindow.isDestroyed()) {
+    panelOverlayWindow.hide();
+  }
 });
 
 ipcMain.on('app-quit', () => {
   app.quit();
 });
 
-ipcMain.on('window-resize', (_event, payload = {}) => {
-  if (!catWindow) return;
+ipcMain.on('window-resize', (event, payload = {}) => {
+  const win = windowFromEvent(event);
+  // Overlay is always work-area sized; only the cat window resizes
+  if (!win || win !== catWindow || !catWindow) return;
   const width = toSafeInt(payload.width, CAT_WINDOW_WIDTH);
   const height = toSafeInt(payload.height, getDefaultCatWindowHeight());
   const anchorBottom = !!payload.anchorBottom;
@@ -496,8 +655,13 @@ if (gotSingleInstanceLock) {
     }
 
     createCatWindow();
+    createPanelOverlayWindow();
     createTray();
     startWorkTracker();
+
+    screen.on('display-metrics-changed', () => {
+      syncPanelOverlayBounds();
+    });
 
     agent.runHealthCheck().then((health) => {
       if (health) console.log('[Meow] Gemini health:', health.ok ? health.message : `${health.reason}: ${health.message}`);
@@ -506,10 +670,22 @@ if (gotSingleInstanceLock) {
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         createCatWindow();
-      } else if (catWindow) {
-        catWindow.show();
+        createPanelOverlayWindow();
+      } else {
+        if (catWindow) catWindow.show();
+        if (panelOverlayWindow && !panelOverlayWindow.isDestroyed()) {
+          panelOverlayWindow.show();
+          if (catWindow) catWindow.moveTop();
+        }
       }
     });
+  });
+
+  app.on('before-quit', () => {
+    if (panelOverlayWindow && !panelOverlayWindow.isDestroyed()) {
+      panelOverlayWindow.destroy();
+      panelOverlayWindow = null;
+    }
   });
 
   app.on('window-all-closed', () => {

@@ -49,6 +49,12 @@ jobs:
       - name: Run offline command tests
         run: npm run test:commands
 
+      - name: Run productivity logic tests
+        run: npm run test:productivity
+
+      - name: Run walk-placement tests
+        run: npm run test:walk-placement
+
   build-mac:
     needs: test-commands
     runs-on: macos-latest
