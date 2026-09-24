@@ -1,6 +1,6 @@
 # AI Meow 🐱
 
-A floating cute cat desktop buddy for **macOS and Windows**. Meow lives on your screen, makes adorable expressions, and chats with you about your day — motivating you when you need it.
+A floating cute cat desktop buddy for **macOS and Windows**. Meow lives on your screen, makes adorable expressions, and chats with you about your day — with optional **tasks, hydration reminders, and focus timers** (Polen-style productivity).
 
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue)
 
@@ -11,16 +11,38 @@ A floating cute cat desktop buddy for **macOS and Windows**. Meow lives on your 
 - **Two cats to choose from** — classic SVG Cat 1, or video-clip Cat 2 with hunger meter, feed prompts, and idle activities
 - **Full mini cat** — expressions, eye tracking, and 58+ animations (Cat 1) / video clips (Cat 2)
 - **Little agent** — ask Meow to open apps, folders, and websites offline on macOS or Windows (see [commands](#meow-the-little-agent) below)
-- **Chat dialog** — talk about your day, get motivation, or something cute
+- **Chat on the cat** — chat panel attaches to the cat window; productivity panels float on a separate overlay
+- **Polen's panel** — Tasks / Remind / Focus hub you can drag anywhere on the desktop (click-through except on panels)
 - **Look tab** (Cat 1) — change coat color and accessories (hat, bow, scarf, flower, glasses)
 - **Food system** — drag bowl to feed; choose Plain or Fishy; learns your preferences over time
 - **Idle life** — laptop, reading, phone, coffee, notebook, gaming, walking, napping, scratching, and more
-- **Focus Mode & Settings** — quiet/normal/chatty, reduced motion, break snooze defaults (**Focus mode** = quiet paws; separate from Focus **session** timer)
-- **Today tasks panel** — floating checklist beside the cat; pin it so it stays visible while you drag
-- **Focus session** — double-click the cat (or Shift/Alt-click, or chat → ⏱ Focus) for a countdown timer; optional “procrastinating” nap beside the timer
-- **Water reminders** — optional cursor chase until you tap “I drank water,” with a small celebration payoff
+- **Focus Mode & Settings** — quiet/normal/chatty, reduced motion, **cat sounds** toggle, break snooze defaults
+- **Today tasks** — today / tomorrow lists, progress bar, pin **today with Polen** mini-widget
+- **All done celebration** — when every today task is checked off, the cat congratulates you
+- **Focus session** — double-click the cat (or Shift/Alt-click, or hub → Focus) for a countdown; optional rain ambience
+- **Water reminders** — cat chases your cursor; hydration prompt sits **above the cat** until you acknowledge or snooze
 - **Break reminder** — after 2 hours of continuous work, with 10/30/60 min snooze
 - **System tray** — hide/show or quit from the menu bar (macOS) or notification area (Windows)
+
+## How the UI works (Cat 2 recommended)
+
+| Window | What it is |
+|--------|------------|
+| **Cat window** | Small, always-on-top pet: cat, chat, speech bubbles, hydration UI |
+| **Panel overlay** | Full work-area layer: Polen's hub, pinned today list, focus timer — **transparent except where you see panels** |
+
+- **Click the cat** → toggles **Polen's panel** (Tasks hub), unless chat is in **docked** mode (see below).
+- **Hub does not open on launch** — only after you click the cat or open it from chat.
+- **Drag** panels using `:: drag me` handles; positions are remembered.
+
+### Chat & panel together
+
+1. Open chat from the hub **💬** (or settings **⚙** in chat header).
+2. **Docked chat:** cat clicks **open/close chat** until you dismiss chat with **×** on the chat header.
+3. If the hub is closed but chat stays open, use **📋** in the chat header to open **Polen's panel** again.
+4. Quick actions: **📝 Tasks** and **⏱ Focus** in chat jump straight to those hub tabs.
+
+While chat is docked, **double-click** and **Shift/Alt-click** will not accidentally open Focus (rapid clicks are safe).
 
 ## Requirements
 
@@ -60,13 +82,13 @@ cd Cat-Desktop-Buddy
 ```bash
 npm install        # first time only
 npm start          # Cat 1
-npm run start:cat2 # Cat 2
+npm run start:cat2 # Cat 2 (productivity overlay + Polen panel)
 npm run stop       # if cats won't disappear
 ```
 
 ## Meow the little agent
 
-Meow can open and close apps for you. **Click the cat** to open chat, then type a request like:
+Meow can open and close apps for you. **Open chat** (click cat or hub 💬), then type a request like:
 
 ### Open apps
 
@@ -112,7 +134,7 @@ The most frequent "open X" commands are recognized on-device, so they work insta
 
 ### Optional: natural language via Gemini
 
-For fuzzier phrasing ("open whatever I use to jot things down"), add a **Gemini API key** in the **Settings** tab (⚙):
+For fuzzier phrasing ("open whatever I use to jot things down"), add a **Gemini API key** in the **Settings** tab (⚙ in chat):
 
 1. Get a free key from [aistudio.google.com](https://aistudio.google.com).
 2. Open Meow → Settings → paste the key under **Gemini API key** → **Save** → **Test Gemini**.
@@ -126,8 +148,8 @@ AI Meow is built for **Windows as a first-class platform**, not macOS-only:
 | Feature | Windows behavior |
 |---------|------------------|
 | Launch scripts | Cross-platform `npm start` / `Start Meow.bat` |
-| Transparent window | Frameless window with Windows-specific chrome fixes |
-| Drag the cat | Full-screen movement; no stuck/small drag area after repeated moves |
+| Transparent window | Frameless cat + overlay windows with platform-specific fixes |
+| Drag the cat | Full-screen movement; water chase moves the cat window via main process |
 | Tray | Notification area (system tray) — right-click for Show/Hide/Quit, **double-click** to toggle |
 | Break alert | Window nudge + taskbar flash |
 | Stop script | PowerShell-based process kill via `npm run stop` |
@@ -217,16 +239,24 @@ The picker appears **every time** the app starts so you can switch cats whenever
 - **Focus mode** — quiet paws; pause idle interruptions (not the Focus session timer)
 - **Chatty level** — Quiet / Normal / Chatty
 - **Reduced motion** — fewer animations
+- **Cat sounds** — meow audio on idle meow clips (off = silent; volume is kept moderate when on)
 - **Break snooze default** — 10 / 30 / 60 min
-- **Water reminders** — enable + interval (30 / 45 / 60 min); cat chases cursor until acknowledged
+- **Feed interval** (Cat 2) — how often hunger / feed prompts appear
 - **Gemini API key** — optional, for natural-language tasks beyond offline commands
 
-### Productivity (Tasks / Focus session)
+### Polen's panel (Tasks / Remind / Focus)
 
-- Chat → **📝 Tasks** opens the Today panel; pin 📌 to keep it beside the cat when chat is closed
-- Chat → **⏱ Focus**, double-click the cat, or Shift/Alt-click → “Ready to focus?” duration picker
-- Check **I’ve been procrastinating** to nap beside the countdown during the session
-- When water is overdue, tap **I drank water** for a short celebration
+Open via **click cat** (when chat is not docked), hub **💬 → 📋**, or chat **📋** when the hub is hidden.
+
+| Tab | What it does |
+|-----|----------------|
+| **Tasks** | Add tasks for **today** or **tomorrow**, check off, pin today widget |
+| **Remind** | Water reminders on/off; intervals **30 / 45 / 60 min** (plus **10s** for local testing) |
+| **Focus** | Pick duration, optional rain, start session; floating timer while you work |
+
+- **Focus session:** double-click cat, Shift/Alt-click, or Focus tab — not while chat is docked (use hub or chat ⏱ instead).
+- **Water:** when overdue, the cat walks toward your cursor; use **I drank water** or **Not now** (10 min snooze).
+- **Finish all today tasks:** the cat celebrates with speech and a bounce.
 
 ## Chat examples
 
@@ -247,11 +277,12 @@ The picker appears **every time** the app starts so you can switch cats whenever
 ## Development & testing
 
 ```bash
-npm run test:commands       # loop all offline commands (intent + launcher checks)
+npm run test:commands            # loop all offline commands (intent + launcher checks)
 npm run test:commands -- --live  # actually open each app on your machine
-npm run test:productivity   # day rollover, focus countdown, water overdue helpers
-npm run test:gemini         # test Gemini API connection
-npm run test:cat2-walk      # Cat 2 walk sync sanity check
+npm run test:productivity        # day rollover, focus countdown, water overdue helpers
+npm run test:walk-placement        # panel position clamp / migration helpers
+npm run test:gemini              # test Gemini API connection
+npm run test:cat2-walk           # Cat 2 walk sync sanity check
 ```
 
 Command and productivity tests run automatically in CI on both macOS and Windows before installers are built.
@@ -263,26 +294,33 @@ Cat-Desktop-Buddy/
 ├── Start Meow.bat / .command      # One-click launch (Cat 1)
 ├── Start Meow 2.command           # One-click launch (Cat 2, macOS)
 ├── launcher-main.js               # Packaged app: cat picker entry
-├── main.js                        # Electron main process
+├── main.js                        # Electron main (cat + overlay windows, IPC)
 ├── preload.js
 ├── main/
 │   ├── agent.js                   # Chat agent orchestrator
 │   ├── actions.js                 # Allowlisted OS app launcher
 │   ├── intents.js                 # Offline command matcher
 │   └── gemini.js                  # Gemini API client
+├── assets/sounds/                 # e.g. focus session spring ambience
 ├── scripts/
 │   ├── start.js / start-cat2.js
 │   ├── stop.js
-│   ├── test-commands.js           # Command test loop
-│   └── test-productivity.js       # Tasks / focus / water helpers
+│   ├── test-commands.js
+│   ├── test-productivity.js
+│   └── test-walk-placement.js
 └── src/
     ├── index.html                 # Cat 1 shell
-    ├── index-cat2.html            # Cat 2 shell
-    ├── productivity-logic.js      # Pure helpers (also used by tests)
-    ├── productivity.js            # Today tasks, focus session, water chase
-    ├── cat.js                     # Cat 1 behavior
-    ├── cat2/                      # Cat 2 modules (feed, sleep, activities, …)
-    ├── chat.js
+    ├── index-cat2.html            # Cat 2 shell (chat + cat)
+    ├── index-panels.html          # Overlay shell (Polen hub, timers)
+    ├── panel-cat-boot.js          # Cat window boot flag
+    ├── panel-overlay-boot.js      # Overlay boot flag
+    ├── cat-bridge.js              # Cat → overlay IPC (hub, chat, water)
+    ├── overlay-hit.js             # Click-through except on interactive UI
+    ├── productivity-logic.js      # Pure helpers (tests + browser)
+    ├── productivity.js            # Hub UI, focus, water chase, tasks
+    ├── walk-placement.js          # Drag/clamp helpers for overlay panels
+    ├── cat.js / cat2/             # Cat behavior
+    ├── chat.js                    # Chat attached to cat window
     ├── settings.js
     ├── appearance.js
     └── personality.js
@@ -291,10 +329,11 @@ Cat-Desktop-Buddy/
 ## Tips
 
 - Meow starts in the bottom-right corner of your screen
-- **Click the cat body** to open/close chat
-- **Drag the cat** to move the window (hold and move — a small threshold avoids accidental drags when clicking)
+- **Click the cat** → Polen's panel (or toggle docked chat if you opened chat from the hub)
+- **Drag the cat window** to move the pet; **drag panel handles** to move tasks/hub on the desktop
 - Drag the food bowl to the cat's mouth to feed
-- Open chat → **✨ Look** (Cat 1) for coat/accessories · **⚙** for Focus Mode & settings
+- Chat → **✨ Look** (Cat 1) for coat/accessories · **⚙** for settings
+- Close chat with **×** on the chat header to leave docked mode and return to hub-on-click behavior
 
 ---
 
