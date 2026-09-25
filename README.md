@@ -1,6 +1,6 @@
 # AI Meow 🐱
 
-A floating cute cat desktop buddy for **macOS and Windows**. Meow lives on your screen, makes adorable expressions, and chats with you about your day — with optional **tasks, hydration reminders, and focus timers** (Polen-style productivity).
+A floating cute cat desktop buddy for **macOS and Windows**. Meow lives on your screen, makes adorable expressions, and chats with you about your day — with optional **tasks, hydration reminders, and focus timers** (Syrax-style productivity).
 
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue)
 
@@ -12,12 +12,12 @@ A floating cute cat desktop buddy for **macOS and Windows**. Meow lives on your 
 - **Full mini cat** — expressions, eye tracking, and 58+ animations (Cat 1) / video clips (Cat 2)
 - **Little agent** — ask Meow to open apps, folders, and websites offline on macOS or Windows (see [commands](#meow-the-little-agent) below)
 - **Chat on the cat** — chat panel attaches to the cat window; productivity panels float on a separate overlay
-- **Polen's panel** — Tasks / Remind / Focus hub you can drag anywhere on the desktop (click-through except on panels)
+- **Syrax's panel** — Tasks / Remind / Focus hub you can drag anywhere on the desktop (click-through except on panels)
 - **Look tab** (Cat 1) — change coat color and accessories (hat, bow, scarf, flower, glasses)
 - **Food system** — drag bowl to feed; choose Plain or Fishy; learns your preferences over time
 - **Idle life** — laptop, reading, phone, coffee, notebook, gaming, walking, napping, scratching, and more
-- **Focus Mode & Settings** — quiet/normal/chatty, reduced motion, **cat sounds** toggle, break snooze defaults
-- **Today tasks** — today / tomorrow lists, progress bar, pin **today with Polen** mini-widget
+- **Focus, Patrol, and activity level** — Focus is quiet and keeps Patrol off (including during a focus timer). Patrol roams and plays. Quiet / Normal / Chatty changes how often that happens.
+- **Today tasks** — today / tomorrow lists, progress bar, pin **today with Syrax** mini-widget
 - **All done celebration** — when every today task is checked off, the cat congratulates you
 - **Focus session** — double-click the cat (or Shift/Alt-click, or hub → Focus) for a countdown; optional rain ambience
 - **Water reminders** — cat chases your cursor; hydration prompt sits **above the cat** until you acknowledge or snooze
@@ -29,9 +29,9 @@ A floating cute cat desktop buddy for **macOS and Windows**. Meow lives on your 
 | Window | What it is |
 |--------|------------|
 | **Cat window** | Small, always-on-top pet: cat, chat, speech bubbles, hydration UI |
-| **Panel overlay** | Full work-area layer: Polen's hub, pinned today list, focus timer — **transparent except where you see panels** |
+| **Panel overlay** | Full work-area layer: Syrax's hub, pinned today list, focus timer — **transparent except where you see panels** |
 
-- **Click the cat** → toggles **Polen's panel** (Tasks hub), unless chat is in **docked** mode (see below).
+- **Click the cat** → toggles **Syrax's panel** (Tasks hub), unless chat is in **docked** mode (see below).
 - **Hub does not open on launch** — only after you click the cat or open it from chat.
 - **Drag** panels using `:: drag me` handles; positions are remembered.
 
@@ -39,7 +39,7 @@ A floating cute cat desktop buddy for **macOS and Windows**. Meow lives on your 
 
 1. Open chat from the hub **💬** (or settings **⚙** in chat header).
 2. **Docked chat:** cat clicks **open/close chat** until you dismiss chat with **×** on the chat header.
-3. If the hub is closed but chat stays open, use **📋** in the chat header to open **Polen's panel** again.
+3. If the hub is closed but chat stays open, use **📋** in the chat header to open **Syrax's panel** again.
 4. Quick actions: **📝 Tasks** and **⏱ Focus** in chat jump straight to those hub tabs.
 
 While chat is docked, **double-click** and **Shift/Alt-click** will not accidentally open Focus (rapid clicks are safe).
@@ -82,7 +82,7 @@ cd Cat-Desktop-Buddy
 ```bash
 npm install        # first time only
 npm start          # Cat 1
-npm run start:cat2 # Cat 2 (productivity overlay + Polen panel)
+npm run start:cat2 # Cat 2 (productivity overlay + Syrax panel)
 npm run stop       # if cats won't disappear
 ```
 
@@ -236,27 +236,30 @@ The picker appears **every time** the app starts so you can switch cats whenever
 
 ## Settings (chat → ⚙)
 
-- **Focus mode** — quiet paws; pause idle interruptions (not the Focus session timer)
-- **Chatty level** — Quiet / Normal / Chatty
+- **Focus mode** — quiet company: no walks, play, or feed reminders. Patrol cannot turn on.
+- **Patrol mode** — roam and play; no feed reminders. The switch stays off during Focus mode and during a focus timer.
+- **Activity level** — Quiet / Normal / Chatty. In loaf mode this changes how often Syrax plays or talks. In Patrol it changes how often Syrax roams.
 - **Reduced motion** — fewer animations
 - **Cat sounds** — meow audio on idle meow clips (off = silent; volume is kept moderate when on)
 - **Break snooze default** — 10 / 30 / 60 min
-- **Feed interval** (Cat 2) — how often hunger / feed prompts appear
+- **Feed interval** (Cat 2) — how long the hunger meter takes to fill; the cat only begs and shows the hungry clip when the meter is full, and does other idle activities until then
 - **Gemini API key** — optional, for natural-language tasks beyond offline commands
 
-### Polen's panel (Tasks / Remind / Focus)
+### Syrax's panel (Tasks / Remind / Focus)
 
 Open via **click cat** (when chat is not docked), hub **💬 → 📋**, or chat **📋** when the hub is hidden.
 
 | Tab | What it does |
 |-----|----------------|
-| **Tasks** | Add tasks for **today** or **tomorrow**, check off, pin today widget |
+| **Tasks** | Add tasks for **today** or **tomorrow**, check off, pin a **today card** |
 | **Remind** | Water reminders on/off; intervals **30 / 45 / 60 min** (plus **10s** for local testing) |
 | **Focus** | Pick duration, optional rain, start session; floating timer while you work |
 
-- **Focus session:** double-click cat, Shift/Alt-click, or Focus tab — not while chat is docked (use hub or chat ⏱ instead).
-- **Water:** when overdue, the cat walks toward your cursor; use **I drank water** or **Not now** (10 min snooze).
-- **Finish all today tasks:** the cat celebrates with speech and a bounce.
+Pinning **today** opens a mini card at the same spot as Syrax’s panel (nudged a little if both stay open). The full panel and the today card can stay on screen together. **Hide today card** / **show today card** toggles only the mini card. **▣** on the mini card opens the full panel at the card’s position. **×** on the mini card unpins it. Closing the full panel leaves the today card up if it is still shown.
+
+- **Focus session:** double-click cat, Shift/Alt-click, or Focus tab — not while chat is docked (use hub or chat ⏱ instead). **▣** on the timer opens Syrax's panel. The session keeps Syrax quiet and holds the Patrol switch off until you end it.
+- **Water:** turning reminders on starts a countdown. The cat follows you only after the chosen interval. **I drank water** starts that interval again. **Not now** waits 10 minutes, then chases again.
+- **Add tasks** in Syrax's panel. **Check them off** on the today card. Syrax praises each today task, even if a feed prompt or a Focus nap is in the way. **Finish all today tasks:** a bigger celebration with speech and a bounce. Tasks and chat start empty each time you launch the app.
 
 ## Chat examples
 
@@ -287,6 +290,14 @@ npm run test:cat2-walk           # Cat 2 walk sync sanity check
 
 Command and productivity tests run automatically in CI on both macOS and Windows before installers are built.
 
+Checking off one **today** task should print three lines:
+
+1. `[CORRECT] overlay: task praise · …`
+2. `[CORRECT] cat:task-reaction → cat + overlay · …`
+3. `[CORRECT] cat: task praise shown · …`
+
+If the first line is missing, the check-off did not count as finishing a today task. If the third line is missing, the cat window did not show the bubble. The today card also flashes Syrax's line while the bubble is up, including when chat or settings cover the cat.
+
 ## Project structure
 
 ```
@@ -311,7 +322,7 @@ Cat-Desktop-Buddy/
 └── src/
     ├── index.html                 # Cat 1 shell
     ├── index-cat2.html            # Cat 2 shell (chat + cat)
-    ├── index-panels.html          # Overlay shell (Polen hub, timers)
+    ├── index-panels.html          # Overlay shell (Syrax hub, timers)
     ├── panel-cat-boot.js          # Cat window boot flag
     ├── panel-overlay-boot.js      # Overlay boot flag
     ├── cat-bridge.js              # Cat → overlay IPC (hub, chat, water)
@@ -329,7 +340,7 @@ Cat-Desktop-Buddy/
 ## Tips
 
 - Meow starts in the bottom-right corner of your screen
-- **Click the cat** → Polen's panel (or toggle docked chat if you opened chat from the hub)
+- **Click the cat** → Syrax's panel (or toggle docked chat if you opened chat from the hub)
 - **Drag the cat window** to move the pet; **drag panel handles** to move tasks/hub on the desktop
 - Drag the food bowl to the cat's mouth to feed
 - Chat → **✨ Look** (Cat 1) for coat/accessories · **⚙** for settings

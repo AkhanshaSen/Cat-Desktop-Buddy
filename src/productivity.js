@@ -1,5 +1,5 @@
 /**
- * Productivity UI — Polen-style hub (Tasks / Remind / Focus), water chase, focus timer.
+ * Productivity UI — Syrax hub (Tasks / Remind / Focus), water chase, focus timer.
  * Depends on MeowProductivityLogic, MeowCat, MeowSettings, meowAPI.
  */
 (() => {
@@ -9,7 +9,7 @@
     return;
   }
 
-  const TASKS_KEY = 'meowTasks';
+  const TASKS_KEY = 'meowSessionTasks';
   const WATER_KEY = 'meowWater';
   const PROD_SETTINGS_KEY = 'meowProductivitySettings';
 
@@ -18,14 +18,7 @@
     || document.body?.classList?.contains('panel-overlay-root')
     || /index-panels\.html/i.test(String(location?.href || ''));
 
-  const isCat2 = () =>
-    isOverlay()
-      ? true /* panels shell is shared; cat2 sizing only matters for cat window */
-      : (!!document.getElementById('cat2-canvas-a') ||
-        document.getElementById('cat')?.classList.contains('cat2-mode'));
-
   const CAT_W = 220;
-  const HUB_W = 240;
   const CAT1_H = 240;
   const CAT2_H = 460;
   const FOCUS_SPRING_SRC = '../assets/sounds/focus-spring.mp3';
@@ -36,6 +29,23 @@
     } catch (_) {
       console.log('[Meow]', ...args);
     }
+  }
+
+  const $ = (id) => document.getElementById(id);
+
+  function onClick(id, fn, { prevent = false } = {}) {
+    $(id)?.addEventListener('click', (e) => {
+      if (prevent) e.preventDefault();
+      e.stopPropagation();
+      fn(e);
+    }, prevent);
+  }
+
+  function onBroadcast(map) {
+    window.meowAPI?.onBroadcast?.((channel, payload) => {
+      meowLog('broadcast recv', channel, payload ?? '');
+      map[channel]?.(payload);
+    });
   }
 
   const DEFAULT_WATER = {
@@ -51,6 +61,7 @@
     taskDay: 'today',
     focusTimerSize: 'M',
     tasksWidgetPinned: false,
+    pinnedTasksVisible: false,
     focusRain: false,
     focusMinutes: 25,
     screenPositions: {
@@ -68,6 +79,7 @@
   let focusSession = null;
   let focusTickTimer = null;
   let waterTickTimer = null;
+  let waterSnoozeTimer = null;
   let chaseActive = false;
   let chaseRaf = null;
   let chasePaused = false;
@@ -89,13 +101,17 @@
     placementResyncMs: 250,
   };
   let taskNudgeTimer = null;
-  let quietAutoEnabled = false;
   let panelDrag = null;
   let focusSpringAudio = null;
 
+  function taskStorage() {
+    return window.sessionStorage;
+  }
+
   function loadJson(key, fallback) {
     try {
-      const raw = localStorage.getItem(key);
+      const store = key === TASKS_KEY ? taskStorage() : localStorage;
+      const raw = store.getItem(key);
       if (!raw) return fallback;
       return JSON.parse(raw);
     } catch (_) {
@@ -104,10 +120,12 @@
   }
 
   function saveJson(key, value) {
-    localStorage.setItem(key, JSON.stringify(value));
+    const store = key === TASKS_KEY ? taskStorage() : localStorage;
+    store.setItem(key, JSON.stringify(value));
   }
 
   function loadAll() {
+    try { localStorage.removeItem('meowTasks'); } catch (_) { /* old persistent list */ }
     taskStore = Logic.normalizeTaskStore(loadJson(TASKS_KEY, null));
     const w = loadJson(WATER_KEY, null);
     waterState = {
@@ -126,6 +144,9 @@
       taskDay: p?.taskDay === 'tomorrow' ? 'tomorrow' : 'today',
       focusTimerSize: Logic.normalizeFocusTimerSize(p?.focusTimerSize),
       tasksWidgetPinned: migratedPin,
+      pinnedTasksVisible: typeof p?.pinnedTasksVisible === 'boolean'
+        ? p.pinnedTasksVisible
+        : migratedPin,
       focusRain: !!p?.focusRain,
       focusMinutes: Logic.normalizeFocusMinutes(p?.focusMinutes ?? 25, true),
       screenPositions: Logic.normalizeScreenPositions(p || {}, DEFAULT_PROD.screenPositions),
@@ -169,7 +190,9 @@
   }
 
   function isPatrolModeActive() {
-    return !!getSettings().patrolMode && !getSettings().focusMode;
+    const settings = getSettings();
+    const focusQuiet = !!settings.focusMode || !!settings.focusSession || !!focusSession;
+    return !!settings.patrolMode && !focusQuiet;
   }
 
   function shouldSuppressIdle() {
@@ -197,7 +220,7 @@
   }
 
   function pinnedWidgetOpen() {
-    return !!prodPrefs.tasksWidgetPinned;
+    return !!prodPrefs.tasksWidgetPinned && prodPrefs.pinnedTasksVisible !== false;
   }
 
   function desiredWindowSize() {
@@ -327,6 +350,51 @@
     });
     saveTasks();
     renderAllTasks();
+    meowLog('task added', trimmed);
+  }
+
+  function focusNapRemainingMs() {
+    if (!focusSession) return 0;
+    if (focusSession.paused) return focusSession.remainingAtPause || 0;
+    return Logic.remainingMs(focusSession.endsAt);
+  }
+
+  let pinnedPraiseTimer = null;
+
+  function showPinnedPraise(text, duration) {
+    const el = document.getElementById('pinned-task-praise');
+    if (!el) return;
+    el.textContent = text;
+    el.classList.remove('hidden');
+    if (pinnedPraiseTimer) clearTimeout(pinnedPraiseTimer);
+    pinnedPraiseTimer = setTimeout(() => {
+      pinnedPraiseTimer = null;
+      el.classList.add('hidden');
+    }, duration);
+  }
+
+  function announceTaskReaction(text, { allDone = false, expression = 'love', duration = 3500 } = {}) {
+    const payload = {
+      text,
+      duration,
+      allDone: !!allDone,
+      expression: allDone ? 'excited' : expression,
+      resumeNap: !!focusSession,
+      napRemainingMs: focusNapRemainingMs(),
+    };
+    meowLog('Syrax says', String(text).slice(0, 80));
+    showPinnedPraise(text, duration);
+    if (isOverlay()) {
+      broadcast('cat:task-reaction', payload);
+      return;
+    }
+    window.MeowCat?.reactToTask?.(payload);
+  }
+
+  function reactTaskDone(taskText, remainingUnchecked) {
+    const line = Logic.pickTaskDoneLine({ taskText, remainingUnchecked });
+    meowLog('taskDoneReaction', { remainingUnchecked });
+    announceTaskReaction(line, { allDone: false, expression: 'love', duration: 3500 });
   }
 
   function toggleTask(id) {
@@ -337,10 +405,18 @@
       if (item) {
         const markingDone = !item.done;
         item.done = !item.done;
+        const isToday = bucket === taskStore.today;
+        meowLog(markingDone ? 'task ticked off' : 'task ticked on', `${isToday ? 'today' : 'tomorrow'}: ${item.text}`);
         saveTasks();
         renderAllTasks();
-        if (markingDone && bucket === taskStore.today) {
-          celebrateTodayIfComplete(todayUncheckedBefore);
+        if (markingDone && isToday) {
+          const remaining = uncheckedCount('today');
+          if (remaining === 0) celebrateTodayIfComplete(todayUncheckedBefore);
+          else reactTaskDone(item.text, remaining);
+        } else if (!markingDone) {
+          meowLog('no dialog', 'task opened again');
+        } else {
+          meowLog('no dialog', 'tomorrow tasks stay quiet');
         }
         return;
       }
@@ -353,21 +429,16 @@
     if (!items.length || uncheckedBefore <= 0) return;
     if (items.some((t) => !t.done)) return;
     meowLog('celebrateTodayComplete', { count: items.length });
-    const lines = [
-      `All ${items.length} done! You're amazing~ 🎉`,
-      "Today's list is clear! High five! 🐾✨",
-      'Everything checked off! Proud of you~ 🌟',
-      'Finished the whole list! Treat yourself~ 💕',
-    ];
-    say(lines[Math.floor(Math.random() * lines.length)], 4500);
-    catSetExpression('excited');
-    broadcast('cat:celebrate');
+    const line = Logic.pickAllTasksDoneLine({ count: items.length });
+    announceTaskReaction(line, { allDone: true, expression: 'excited', duration: 4500 });
   }
 
   function removeTask(id) {
     taskStore = Logic.normalizeTaskStore(taskStore);
+    const removed = [...taskStore.today.items, ...taskStore.tomorrow.items].find((t) => t.id === id);
     taskStore.today.items = taskStore.today.items.filter((t) => t.id !== id);
     taskStore.tomorrow.items = taskStore.tomorrow.items.filter((t) => t.id !== id);
+    meowLog('task removed', removed?.text || id);
     saveTasks();
     renderAllTasks();
   }
@@ -375,14 +446,32 @@
   function setTasksWidgetPinned(pinned) {
     prodPrefs.tasksWidgetPinned = !!pinned;
     taskStore.notesPinned = false;
-    // Pin = detach: close the full panel so only the mini widget remains
     if (pinned) {
-      prodPrefs.notesVisible = false;
+      prodPrefs.pinnedTasksVisible = true;
+      inheritPanelPosition('hub', 'pinned', { offsetIfBothVisible: hubOpen() });
+    } else {
+      prodPrefs.pinnedTasksVisible = false;
     }
     saveTasks();
     saveProdPrefs();
     syncHubVisibility();
-    renderPinnedTasks();
+    renderAllTasks();
+    refreshPanelFloats();
+  }
+
+  function setPinnedTasksVisible(visible) {
+    if (!prodPrefs.tasksWidgetPinned) return;
+    prodPrefs.pinnedTasksVisible = !!visible;
+    saveProdPrefs();
+    syncHubVisibility();
+    renderAllTasks();
+    refreshPanelFloats();
+  }
+
+  function showFullHubFromPinned() {
+    inheritPanelPosition('pinned', 'hub', { offsetIfBothVisible: pinnedWidgetOpen() });
+    openHub('tasks');
+    refreshPanelFloats();
   }
 
   function setNotesVisible(visible) {
@@ -443,8 +532,7 @@
     const pinned = document.getElementById('pinned-tasks-widget');
     const stack = document.getElementById('buddy-stack');
     const showHub = hubOpen();
-    // Pinned mini-widget only while hub is closed (avoids duplicate task lists)
-    const showPinned = pinnedWidgetOpen() && !showHub;
+    const showPinned = pinnedWidgetOpen();
     meowLog('syncHubVisibility', { showHub, showPinned });
     hub?.classList.toggle('hidden', !showHub);
     pinned?.classList.toggle('hidden', !showPinned);
@@ -452,31 +540,53 @@
     stack?.classList.toggle('hub-open', !!showHub);
     stack?.classList.toggle('pinned-tasks-open', !!showPinned);
     stack?.classList.toggle('hub-chat-open', showHub && isChatOpen());
-    const pinTodayBtn = document.getElementById('hub-pin-today-btn');
-    if (pinTodayBtn) {
-      pinTodayBtn.classList.toggle('active', !!prodPrefs.tasksWidgetPinned);
-      pinTodayBtn.setAttribute('aria-pressed', prodPrefs.tasksWidgetPinned ? 'true' : 'false');
-      pinTodayBtn.textContent = prodPrefs.tasksWidgetPinned ? 'unpin today' : 'pin today';
-    }
+    syncPinControls();
     if (showHub) setHubTab(prodPrefs.activeTab);
-    if (showPinned) renderPinnedTasks();
+    if (showPinned) renderAllTasks();
     syncStackLayout();
     broadcast('hub:visibility', { showHub, showPinned });
   }
 
-  function makeTaskRow(item) {
+  function syncPinControls() {
+    const pinned = !!prodPrefs.tasksWidgetPinned;
+    const visible = prodPrefs.pinnedTasksVisible !== false;
+    const pinTodayBtn = $('hub-pin-today-btn');
+    if (pinTodayBtn) {
+      pinTodayBtn.classList.toggle('active', pinned);
+      pinTodayBtn.setAttribute('aria-pressed', pinned ? 'true' : 'false');
+      pinTodayBtn.textContent = pinned ? 'unpin today' : 'pin today';
+      pinTodayBtn.title = pinned
+        ? 'Remove the today card'
+        : 'Show today card at this panel’s position';
+    }
+    const visBtn = $('hub-today-visible-btn');
+    if (visBtn) {
+      visBtn.classList.toggle('hidden', !pinned);
+      visBtn.classList.toggle('active', pinned && visible);
+      visBtn.setAttribute('aria-pressed', visible ? 'true' : 'false');
+      visBtn.textContent = visible ? 'hide today card' : 'show today card';
+    }
+  }
+
+  function makeTaskRow(item, { allowCheck = false } = {}) {
     const row = document.createElement('div');
     row.className = `hub-task-item${item.done ? ' done' : ''}`;
 
-    const check = document.createElement('button');
-    check.type = 'button';
+    const check = document.createElement(allowCheck ? 'button' : 'span');
     check.className = 'hub-task-check';
-    check.title = item.done ? 'Mark incomplete' : 'Mark done';
+    if (!allowCheck) check.classList.add('hub-task-check-static');
     check.textContent = item.done ? '✓' : '';
-    check.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleTask(item.id);
-    });
+    if (allowCheck) {
+      check.type = 'button';
+      check.title = item.done ? 'Mark incomplete' : 'Mark done';
+      check.addEventListener('click', (e) => {
+        e.stopPropagation();
+        meowLog('task circle pressed', item.text);
+        toggleTask(item.id);
+      });
+    } else {
+      check.title = 'Add tasks here. Check them off on the today card.';
+    }
 
     const label = document.createElement('span');
     label.className = 'hub-task-text';
@@ -498,7 +608,7 @@
     return row;
   }
 
-  function renderTaskList(listEl, items, emptyEl, emptyText) {
+  function renderTaskList(listEl, items, emptyEl, emptyText, allowCheck) {
     if (!listEl) return;
     listEl.innerHTML = '';
     const { active, finished } = Logic.partitionTasks(items);
@@ -508,13 +618,13 @@
       return;
     }
     emptyEl?.classList.add('hidden');
-    active.forEach((item) => listEl.appendChild(makeTaskRow(item)));
+    active.forEach((item) => listEl.appendChild(makeTaskRow(item, { allowCheck })));
     if (finished.length > 0) {
       const heading = document.createElement('div');
       heading.className = 'hub-finished-heading';
       heading.textContent = 'Finished';
       listEl.appendChild(heading);
-      finished.forEach((item) => listEl.appendChild(makeTaskRow(item)));
+      finished.forEach((item) => listEl.appendChild(makeTaskRow(item, { allowCheck })));
     }
   }
 
@@ -529,36 +639,40 @@
     }
   }
 
-  function renderTasks() {
-    taskStore = Logic.normalizeTaskStore(taskStore);
-    const items = activeDayItems();
-    updateProgressUi('hub-task-progress', 'hub-progress-fill', items);
-    renderTaskList(
-      document.getElementById('hub-task-list'),
-      items,
-      document.getElementById('hub-task-empty'),
-      prodPrefs.taskDay === 'tomorrow'
+  const TASK_VIEWS = [
+    {
+      listId: 'hub-task-list',
+      emptyId: 'hub-task-empty',
+      progressId: 'hub-task-progress',
+      fillId: 'hub-progress-fill',
+      enabled: () => true,
+      getItems: () => activeDayItems(),
+      emptyText: () => (prodPrefs.taskDay === 'tomorrow'
         ? 'nothing for tomorrow yet 🌙'
-        : "no tasks yet! what's on your plate? 🍽️"
-    );
-  }
+        : "no tasks yet! what's on your plate? 🍽️"),
+      allowCheck: false,
+    },
+    {
+      listId: 'pinned-task-list',
+      emptyId: 'pinned-task-empty',
+      progressId: 'pinned-task-progress',
+      fillId: 'pinned-progress-fill',
+      enabled: pinnedWidgetOpen,
+      getItems: () => taskStore.today.items,
+      emptyText: () => "no tasks yet — open Syrax's panel to add some",
+      allowCheck: true,
+    },
+  ];
 
-  function renderPinnedTasks() {
-    if (!pinnedWidgetOpen()) return;
-    taskStore = Logic.normalizeTaskStore(taskStore);
-    const items = taskStore.today.items;
-    updateProgressUi('pinned-task-progress', 'pinned-progress-fill', items);
-    renderTaskList(
-      document.getElementById('pinned-task-list'),
-      items,
-      document.getElementById('pinned-task-empty'),
-      "no tasks yet — open Polen's panel to add some"
-    );
+  function renderTaskView(view) {
+    const items = view.getItems();
+    updateProgressUi(view.progressId, view.fillId, items);
+    renderTaskList($(view.listId), items, $(view.emptyId), view.emptyText(), view.allowCheck);
   }
 
   function renderAllTasks() {
-    renderTasks();
-    renderPinnedTasks();
+    taskStore = Logic.normalizeTaskStore(taskStore);
+    TASK_VIEWS.filter((view) => view.enabled()).forEach(renderTaskView);
   }
 
   /* ── Focus session ── */
@@ -619,19 +733,13 @@
     if (chaseActive) stopWaterChase({ silent: true });
 
     const durationMs = mins * 60 * 1000;
-    const quietWasOn = !!getSettings().focusMode;
-    quietAutoEnabled = false;
-    if (!quietWasOn && window.MeowSettings?.setFocusMode) {
-      window.MeowSettings.setFocusMode(true);
-      quietAutoEnabled = true;
-    }
+    window.MeowSettings?.setFocusSessionActive?.(true);
 
     focusSession = {
       endsAt: Date.now() + durationMs,
       durationMs,
       remainingAtPause: null,
       paused: false,
-      quietWasOn,
       napActive: false,
     };
 
@@ -641,7 +749,7 @@
     startFocusNap(durationMs);
     startFocusRain();
 
-    say(`Focus ${mins}m — Polen will nap beside you~ 😴`, 3500);
+    say(`Focus ${mins}m — Syrax will nap beside you~ 😴`, 3500);
 
     if (focusTickTimer) clearInterval(focusTickTimer);
     focusTickTimer = setInterval(tickFocusSession, 250);
@@ -710,10 +818,7 @@
       else window.MeowCat?.wakeUp?.();
     }
 
-    if (quietAutoEnabled && window.MeowSettings?.setFocusMode) {
-      window.MeowSettings.setFocusMode(false);
-    }
-    quietAutoEnabled = false;
+    window.MeowSettings?.setFocusSessionActive?.(false);
 
     applyWindowSize();
     window.dispatchEvent(new CustomEvent('meow:focus-session', { detail: { active: false } }));
@@ -761,8 +866,17 @@
 
   function setWaterEnabled(enabled) {
     waterState.enabled = !!enabled;
+    if (waterState.enabled) {
+      waterState.lastDrinkAt = Date.now();
+      waterState.snoozeUntil = 0;
+      clearWaterSnoozeTimer();
+      stopWaterChase({ silent: true });
+      meowLog('water armed', String(waterState.intervalMinutes));
+    } else {
+      clearWaterSnoozeTimer();
+      stopWaterChase({ silent: true });
+    }
     saveWater();
-    if (!waterState.enabled) stopWaterChase({ silent: true });
     syncWaterSettingsUi();
   }
 
@@ -774,6 +888,7 @@
     if (changed) {
       waterState.lastDrinkAt = Date.now();
       waterState.snoozeUntil = 0;
+      clearWaterSnoozeTimer();
     }
     saveWater();
     syncWaterSettingsUi();
@@ -787,6 +902,32 @@
       const id = Logic.normalizeWaterIntervalId(btn.dataset.mins);
       btn.classList.toggle('active', String(id) === String(waterState.intervalMinutes));
     });
+  }
+
+  function clearWaterSnoozeTimer() {
+    if (waterSnoozeTimer) clearTimeout(waterSnoozeTimer);
+    waterSnoozeTimer = null;
+  }
+
+  function armWaterSnoozeTimer() {
+    clearWaterSnoozeTimer();
+    const wait = Math.max(0, (waterState.snoozeUntil || 0) - Date.now());
+    if (!waterState.snoozeUntil || wait <= 0) return;
+    meowLog('water snoozed', `${Math.round(wait / 1000)}s`);
+    waterSnoozeTimer = setTimeout(() => {
+      waterSnoozeTimer = null;
+      waterState.snoozeUntil = 0;
+      saveWater();
+      meowLog('water snooze ended');
+      if (!waterState.enabled) return;
+      if (focusSession || isChatOpen() || isBreakActive() || chaseActive) {
+        waterState.snoozeUntil = Date.now() + 15000;
+        saveWater();
+        armWaterSnoozeTimer();
+        return;
+      }
+      startWaterChase();
+    }, wait);
   }
 
   function tickWaterReminder() {
@@ -980,6 +1121,7 @@
 
   function acknowledgeWater() {
     stopChaseLoop();
+    clearWaterSnoozeTimer();
     waterState.lastDrinkAt = Date.now();
     waterState.snoozeUntil = 0;
     saveWater();
@@ -991,6 +1133,7 @@
     stopChaseLoop();
     waterState.snoozeUntil = Logic.snoozeWaterUntil();
     saveWater();
+    armWaterSnoozeTimer();
     stopWaterChase({ silent: true });
     say('Okay — remind me in 10 minutes~ 💧', 2800);
     catSetExpression('happy');
@@ -1050,6 +1193,7 @@
     if (waterTickTimer) clearInterval(waterTickTimer);
     if (taskNudgeTimer) clearInterval(taskNudgeTimer);
     waterTickTimer = setInterval(tickWaterReminder, 2000);
+    armWaterSnoozeTimer();
     taskNudgeTimer = setInterval(tickTaskNudge, 90000);
     setTimeout(tickWaterReminder, 3000);
     setTimeout(tickTaskNudge, 45000);
@@ -1097,6 +1241,51 @@
     panel.style.top = `${clamped.y}px`;
     if (!prodPrefs.screenPositions) prodPrefs.screenPositions = {};
     prodPrefs.screenPositions[key] = { x: clamped.x, y: clamped.y };
+  }
+
+  function panelElForKey(key) {
+    if (key === 'hub') return document.getElementById('productivity-hub');
+    if (key === 'pinned') return document.getElementById('pinned-tasks-widget');
+    return null;
+  }
+
+  function getPanelScreenPosition(key, panelEl) {
+    const panel = panelEl || panelElForKey(key);
+    if (panel && !panel.classList.contains('hidden')) {
+      const left = parseFloat(panel.style.left);
+      const top = parseFloat(panel.style.top);
+      if (Number.isFinite(left) && Number.isFinite(top)) return { x: left, y: top };
+    }
+    const saved = prodPrefs.screenPositions?.[key];
+    if (Number.isFinite(Number(saved?.x)) && Number.isFinite(Number(saved?.y))) {
+      return { x: Number(saved.x), y: Number(saved.y) };
+    }
+    return null;
+  }
+
+  /** Copy one panel's screen position onto another, nudging if both stay visible. */
+  function inheritPanelPosition(fromKey, toKey, opts = {}) {
+    const fromEl = panelElForKey(fromKey);
+    const toEl = panelElForKey(toKey);
+    const from = getPanelScreenPosition(fromKey, fromEl);
+    if (!from) return;
+    const work = overlayBoundsCache || {
+      width: window.innerWidth || 1280,
+      height: window.innerHeight || 800,
+    };
+    const toSize = {
+      width: toEl?.offsetWidth || (toKey === 'pinned' ? 220 : 220),
+      height: toEl?.offsetHeight || (toKey === 'pinned' ? 180 : 240),
+    };
+    const fromSize = {
+      width: fromEl?.offsetWidth || 220,
+      height: fromEl?.offsetHeight || 200,
+    };
+    const next = Logic.resolveInheritPosition(from, toSize, fromSize, work, {
+      offsetIfBothVisible: !!opts.offsetIfBothVisible,
+    });
+    if (!prodPrefs.screenPositions) prodPrefs.screenPositions = {};
+    prodPrefs.screenPositions[toKey] = { x: next.x, y: next.y };
   }
 
   /** Drag handle moves the panel across the primary work-area overlay. */
@@ -1152,308 +1341,137 @@
 
   function ensureMarkup() {
     if (!isOverlay()) return;
-    const stack = document.getElementById('buddy-stack');
-    if (!stack) return;
-
-    // Remove legacy notes panel if present (replaced by hub)
     document.getElementById('notes-panel')?.remove();
     document.getElementById('focus-session-modal')?.remove();
-
-    const catContainer = null; // overlay has no cat; panels append to stack
-
     if (!document.getElementById('productivity-hub')) {
-      const hub = document.createElement('div');
-      hub.id = 'productivity-hub';
-      hub.className = 'productivity-hub hidden';
-      hub.innerHTML = `
-        <div class="hub-drag-handle" id="hub-drag-handle">:: drag me</div>
-        <div class="hub-header">
-          <span class="hub-title">Polen's panel</span>
-          <div class="hub-header-actions">
-            <button type="button" id="hub-chat-btn" class="hub-icon-btn" title="Open chat">💬</button>
-            <button type="button" id="hub-settings-btn" class="hub-icon-btn" title="Settings">⚙</button>
-            <button type="button" id="hub-close-btn" class="hub-icon-btn" title="Close">×</button>
-          </div>
-        </div>
-        <div class="hub-tabs" role="tablist">
-          <button type="button" class="hub-tab active" data-tab="tasks">Tasks</button>
-          <button type="button" class="hub-tab" data-tab="remind">Remind</button>
-          <button type="button" class="hub-tab" data-tab="focus">Focus</button>
-        </div>
-
-        <div class="hub-pane" data-pane="tasks">
-          <div class="hub-day-row">
-            <button type="button" class="hub-day-btn active" data-day="today">today</button>
-            <button type="button" class="hub-day-btn" data-day="tomorrow">tomorrow</button>
-          </div>
-          <div class="hub-progress-row">
-            <span id="hub-task-progress" class="hub-task-progress">0/0 done</span>
-            <div class="hub-progress-track"><div id="hub-progress-fill" class="hub-progress-fill"></div></div>
-          </div>
-          <form id="hub-task-form" class="hub-task-form">
-            <input id="hub-task-input" type="text" maxlength="120" placeholder="add a task..." autocomplete="off" />
-            <button type="submit" class="hub-add-btn" title="Add">+</button>
-          </form>
-          <div id="hub-task-list" class="hub-task-list"></div>
-          <p id="hub-task-empty" class="hub-task-empty">no tasks yet! what's on your plate? 🍽️</p>
-          <button type="button" id="hub-pin-today-btn" class="hub-pin-today-btn" aria-pressed="false">pin today</button>
-        </div>
-
-        <div class="hub-pane hidden" data-pane="remind">
-          <div class="hub-remind-row">
-            <span class="hub-remind-label">Water reminders</span>
-            <label class="toggle">
-              <input type="checkbox" id="hub-water-toggle" />
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <p class="hub-hint">Cat chases your cursor until you tap "I drank water"</p>
-          <span class="hub-remind-label">Remind every</span>
-          <div class="segmented hub-water-intervals" id="hub-water-intervals"></div>
-        </div>
-
-        <div class="hub-pane hidden" data-pane="focus">
-          <div class="hub-focus-hero">🧘</div>
-          <p class="hub-focus-title">ready to focus?</p>
-          <p class="hub-hint">Polen will quietly keep you company while you work</p>
-          <label class="hub-focus-duration-label" for="hub-focus-duration">Duration</label>
-          <select id="hub-focus-duration" class="hub-focus-duration"></select>
-          <label class="hub-focus-rain-label">
-            <input type="checkbox" id="hub-focus-rain" />
-            <span>Sound of spring</span>
-          </label>
-          <button type="button" id="hub-focus-start" class="hub-focus-start">start</button>
-        </div>
-        <div class="hub-tail"></div>
-      `;
-      stack.appendChild(hub);
-
-      const intervals = document.getElementById('hub-water-intervals');
-      (Logic.WATER_INTERVAL_PRESETS || []).forEach((p) => {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'water-interval-btn';
-        btn.dataset.mins = p.id;
-        btn.textContent = p.label;
-        intervals?.appendChild(btn);
-      });
-
-      const durationSelect = document.getElementById('hub-focus-duration');
-      (Logic.FOCUS_UI_DURATIONS_MIN || []).forEach((m) => {
-        const opt = document.createElement('option');
-        opt.value = String(m);
-        opt.textContent = `${m} minutes`;
-        durationSelect?.appendChild(opt);
-      });
+      meowLog('overlay markup missing from index-panels.html');
     }
-
-    if (!document.getElementById('pinned-tasks-widget')) {
-      const pin = document.createElement('div');
-      pin.id = 'pinned-tasks-widget';
-      pin.className = 'pinned-tasks-widget hidden';
-      pin.innerHTML = `
-        <div class="pinned-drag-handle" id="pinned-drag-handle" title="Drag pet on desktop">:: drag me</div>
-        <div class="pinned-header">
-          <span class="pinned-title">today with Polen</span>
-          <button type="button" id="pinned-close-btn" class="hub-icon-btn" title="Unpin">×</button>
-        </div>
-        <div class="hub-progress-row">
-          <span id="pinned-task-progress" class="hub-task-progress">0/0 done</span>
-          <div class="hub-progress-track"><div id="pinned-progress-fill" class="hub-progress-fill"></div></div>
-        </div>
-        <div id="pinned-task-list" class="hub-task-list pinned-task-list"></div>
-        <p id="pinned-task-empty" class="hub-task-empty">no tasks yet</p>
-      `;
-      stack.appendChild(pin);
-    }
-
-    if (!document.getElementById('focus-countdown-bar')) {
-      const bar = document.createElement('div');
-      bar.id = 'focus-countdown-bar';
-      bar.className = 'focus-countdown-bar hidden';
-      bar.innerHTML = `
-        <span class="focus-countdown-label">Focus</span>
-        <span id="focus-countdown-text" class="focus-countdown-text">0:00</span>
-        <button type="button" id="focus-cancel-btn" class="focus-cancel-btn" title="Cancel">×</button>
-      `;
-      stack.insertBefore(bar, stack.firstChild);
-    }
-
-    if (!document.getElementById('focus-timer-widget')) {
-      const widget = document.createElement('div');
-      widget.id = 'focus-timer-widget';
-      widget.className = 'focus-timer-widget size-M hidden';
-      widget.innerHTML = `
-        <div class="focus-timer-toolbar">
-          <span class="focus-timer-drag" id="focus-timer-drag">:: drag me</span>
-          <div class="focus-timer-sizes">
-            <button type="button" class="focus-size-btn" data-size="S">S</button>
-            <button type="button" class="focus-size-btn active" data-size="M">M</button>
-            <button type="button" class="focus-size-btn" data-size="L">L</button>
-          </div>
-        </div>
-        <p class="focus-timer-status">Polen is keeping it quiet.</p>
-        <div class="focus-timer-circle">
-          <div id="focus-timer-ring" class="focus-timer-ring"></div>
-          <span id="focus-timer-text" class="focus-timer-text">0:00</span>
-        </div>
-        <div class="focus-timer-actions">
-          <button type="button" id="focus-timer-pause" class="focus-timer-btn">pause</button>
-          <button type="button" id="focus-timer-end" class="focus-timer-btn focus-timer-end">end</button>
-        </div>
-      `;
-      stack.appendChild(widget);
-    }
-
-    /* Water chase UI lives on the cat window (index-cat2.html), not the overlay */
   }
 
   function bindUi() {
-    document.getElementById('hub-task-form')?.addEventListener('submit', (e) => {
+    $('hub-task-form')?.addEventListener('submit', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const input = document.getElementById('hub-task-input');
+      const input = $('hub-task-input');
       addTask(input?.value);
       if (input) input.value = '';
       input?.focus();
     });
 
-    document.getElementById('hub-pin-today-btn')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      setTasksWidgetPinned(!prodPrefs.tasksWidgetPinned);
+    const clicks = {
+      'hub-pin-today-btn': () => setTasksWidgetPinned(!prodPrefs.tasksWidgetPinned),
+      'hub-today-visible-btn': () => setPinnedTasksVisible(prodPrefs.pinnedTasksVisible === false),
+      'pinned-open-hub-btn': showFullHubFromPinned,
+      'pinned-close-btn': () => setTasksWidgetPinned(false),
+      'hub-close-btn': () => setNotesVisible(false),
+      'hub-chat-btn': () => {
+        meowLog('hub chat btn → chat:open');
+        broadcast('chat:open', { tab: 'chat' });
+      },
+      'hub-settings-btn': () => {
+        meowLog('hub settings btn → chat:open settings');
+        broadcast('chat:open', { tab: 'settings' });
+      },
+      'hub-focus-start': () => startFocusSession({
+        minutes: Number($('hub-focus-duration')?.value) || prodPrefs.focusMinutes,
+      }),
+      'focus-cancel-btn': cancelFocusSession,
+      'focus-timer-pause': pauseFocusSession,
+      'focus-timer-end': cancelFocusSession,
+      'focus-timer-hub-btn': () => openHub('tasks'),
+    };
+    Object.entries(clicks).forEach(([id, fn]) => {
+      onClick(id, fn, { prevent: id === 'hub-focus-start' || id === 'focus-cancel-btn' });
     });
 
-    document.getElementById('pinned-close-btn')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      setTasksWidgetPinned(false);
-    });
-
-    document.getElementById('hub-close-btn')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      setNotesVisible(false);
-    });
-
-    document.getElementById('hub-chat-btn')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      meowLog('hub chat btn → chat:open');
-      broadcast('chat:open', { tab: 'chat' });
-    });
-
-    document.getElementById('hub-settings-btn')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      meowLog('hub settings btn → chat:open settings');
-      broadcast('chat:open', { tab: 'settings' });
-    });
-
-    document.querySelectorAll('.hub-tab').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        setHubTab(btn.dataset.tab);
-      });
-    });
-
-    document.querySelectorAll('.hub-day-btn').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        setTaskDay(btn.dataset.day);
-      });
-    });
-
-    document.getElementById('hub-water-toggle')?.addEventListener('change', (e) => {
+    $('hub-water-toggle')?.addEventListener('change', (e) => {
       e.stopPropagation();
       setWaterEnabled(e.target.checked);
     });
-
-    document.querySelectorAll('.water-interval-btn').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        setWaterInterval(btn.dataset.mins);
-      });
-    });
-
-    document.getElementById('hub-focus-duration')?.addEventListener('change', (e) => {
+    $('hub-focus-duration')?.addEventListener('change', (e) => {
       e.stopPropagation();
       prodPrefs.focusMinutes = Logic.normalizeFocusMinutes(e.target.value, true);
       saveProdPrefs();
     });
-
-    document.getElementById('hub-focus-rain')?.addEventListener('change', (e) => {
+    $('hub-focus-rain')?.addEventListener('change', (e) => {
       e.stopPropagation();
       prodPrefs.focusRain = !!e.target.checked;
       saveProdPrefs();
     });
 
-    document.getElementById('hub-focus-start')?.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const select = document.getElementById('hub-focus-duration');
-      startFocusSession({
-        minutes: Number(select?.value) || prodPrefs.focusMinutes,
-      });
-    }, true);
-
-    document.getElementById('focus-cancel-btn')?.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      cancelFocusSession();
-    }, true);
-
-    document.getElementById('focus-timer-pause')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      pauseFocusSession();
+    $('buddy-stack')?.addEventListener('click', (e) => {
+      const tab = e.target.closest?.('.hub-tab');
+      if (tab) { e.stopPropagation(); setHubTab(tab.dataset.tab); return; }
+      const day = e.target.closest?.('.hub-day-btn');
+      if (day) { e.stopPropagation(); setTaskDay(day.dataset.day); return; }
+      const water = e.target.closest?.('.water-interval-btn');
+      if (water) { e.stopPropagation(); setWaterInterval(water.dataset.mins); return; }
+      const size = e.target.closest?.('.focus-size-btn');
+      if (size) { e.stopPropagation(); setFocusTimerSize(size.dataset.size); }
     });
 
-    document.getElementById('focus-timer-end')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      cancelFocusSession();
-    });
-
-    document.querySelectorAll('.focus-size-btn').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        setFocusTimerSize(btn.dataset.size);
-      });
-    });
-
-    bindPanelDrag(document.getElementById('hub-drag-handle'), 'hub');
-    bindPanelDrag(document.getElementById('focus-timer-drag'), 'timer');
-    bindPanelDrag(document.getElementById('pinned-drag-handle'), 'pinned');
+    [
+      ['hub-drag-handle', 'hub'],
+      ['focus-timer-drag', 'timer'],
+      ['pinned-drag-handle', 'pinned'],
+    ].forEach(([id, key]) => bindPanelDrag($(id), key));
 
     window.addEventListener('meow:open-focus-session', () => openHub('focus'));
     window.addEventListener('meow:toggle-notes', () => toggleHub());
     window.addEventListener('meow:open-hub', (ev) => openHub(ev.detail?.tab || 'tasks'));
 
-    window.meowAPI?.onBroadcast?.((channel, payload) => {
-      meowLog('broadcast recv', channel, payload ?? '');
-      if (channel === 'hub:toggle') toggleHub();
-      else if (channel === 'hub:open') openHub(payload?.tab || 'tasks');
-      else if (channel === 'water:ack') acknowledgeWater();
-      else if (channel === 'water:snooze') snoozeWater();
-      else if (channel === 'water:chase-pause') {
-        chasePaused = !!payload?.paused;
-      }
-      // chat:open is handled on the cat window only
+    onBroadcast({
+      'hub:toggle': () => toggleHub(),
+      'hub:open': (payload) => openHub(payload?.tab || 'tasks'),
+      'water:ack': () => acknowledgeWater(),
+      'water:snooze': () => snoozeWater(),
+      'water:chase-pause': (payload) => { chasePaused = !!payload?.paused; },
+      'focus:end-from-toggle': () => {
+        window.MeowSettings?.setFocusSessionActive?.(false, { forceOff: true });
+        cancelFocusSession();
+      },
     });
+    window.addEventListener('meow:end-focus-session', () => cancelFocusSession());
 
-    [
-      'productivity-hub',
-      'pinned-tasks-widget',
-      'focus-countdown-bar',
-      'focus-timer-widget',
-    ].forEach((id) => {
-      document.getElementById(id)?.addEventListener('pointerdown', (e) => {
-        if (e.target.closest('.hub-drag-handle, .focus-timer-drag, .pinned-drag-handle')) return;
-        e.stopPropagation();
+    const dragSel = '.hub-drag-handle, .focus-timer-drag, .pinned-drag-handle';
+    const stopPanel = (e) => {
+      if (e.target.closest(dragSel)) return;
+      e.stopPropagation();
+    };
+    ['productivity-hub', 'pinned-tasks-widget', 'focus-countdown-bar', 'focus-timer-widget']
+      .forEach((id) => {
+        ['pointerdown', 'mousedown'].forEach((type) => $(id)?.addEventListener(type, stopPanel));
       });
-      document.getElementById(id)?.addEventListener('mousedown', (e) => {
-        if (e.target.closest('.hub-drag-handle, .focus-timer-drag, .pinned-drag-handle')) return;
-        e.stopPropagation();
-      });
-    });
   }
 
-  function injectSettingsWaterControls() {
-    /* water also lives in hub Remind tab; settings still sync via syncWaterSettingsUi */
+  function productivityApi(impl) {
+    const noop = () => {};
+    return {
+      init: impl.init,
+      shouldSuppressIdle: impl.shouldSuppressIdle,
+      isFocusSessionActive: impl.isFocusSessionActive,
+      isWaterChaseActive: impl.isWaterChaseActive,
+      isPatrolModeActive,
+      openFocusModal: impl.openFocusModal,
+      closeFocusModal: impl.closeFocusModal || noop,
+      openHub: impl.openHub,
+      toggleHub: impl.toggleHub,
+      toggleNotesPanel: impl.toggleNotesPanel || impl.toggleHub,
+      setNotesVisible: impl.setNotesVisible,
+      setTasksWidgetPinned: impl.setTasksWidgetPinned || noop,
+      getTaskStore: impl.getTaskStore,
+      getWaterState: impl.getWaterState,
+      setWaterEnabled: impl.setWaterEnabled || noop,
+      setWaterInterval: impl.setWaterInterval || noop,
+      syncWaterSettingsUi: impl.syncWaterSettingsUi || noop,
+      acknowledgeWater: impl.acknowledgeWater,
+      snoozeWater: impl.snoozeWater,
+      startFocusSession: impl.startFocusSession,
+      cancelFocusSession: impl.cancelFocusSession || noop,
+      pauseFocusSession: impl.pauseFocusSession || noop,
+      applyWindowSize: impl.applyWindowSize,
+      syncStackLayout: impl.syncStackLayout || noop,
+    };
   }
 
   function initCatRole() {
@@ -1464,32 +1482,22 @@
       if (channel === 'focus-session') remoteFocus = !!payload?.active;
     });
     applyWindowSize();
-    window.MeowProductivity = {
+    window.MeowProductivity = productivityApi({
       init: initCatRole,
       shouldSuppressIdle: () => !!(remoteChase || remoteFocus),
       isFocusSessionActive: () => remoteFocus,
       isWaterChaseActive: () => remoteChase,
-      isPatrolModeActive,
       openFocusModal: () => broadcast('hub:open', { tab: 'focus' }),
-      closeFocusModal: () => {},
       openHub: (tab) => broadcast('hub:open', { tab: tab || 'tasks' }),
       toggleHub: () => broadcast('hub:toggle'),
-      toggleNotesPanel: () => broadcast('hub:toggle'),
       setNotesVisible: (v) => broadcast(v ? 'hub:open' : 'hub:toggle', { tab: 'tasks' }),
-      setTasksWidgetPinned: () => {},
       getTaskStore: () => Logic.normalizeTaskStore(loadJson(TASKS_KEY, null)),
       getWaterState: () => ({ ...DEFAULT_WATER }),
-      setWaterEnabled: () => {},
-      setWaterInterval: () => {},
-      syncWaterSettingsUi: () => {},
       acknowledgeWater: () => broadcast('water:ack'),
       snoozeWater: () => broadcast('water:snooze'),
       startFocusSession: () => broadcast('hub:open', { tab: 'focus' }),
-      cancelFocusSession: () => {},
-      pauseFocusSession: () => {},
       applyWindowSize,
-      syncStackLayout: () => {},
-    };
+    });
   }
 
   function init() {
@@ -1509,7 +1517,6 @@
     void fetchOverlayBounds();
     ensureMarkup();
     bindUi();
-    injectSettingsWaterControls();
     syncHubVisibility();
     syncWaterSettingsUi();
     syncFocusPaneUi();
@@ -1531,12 +1538,11 @@
     }, 60 * 1000);
   }
 
-  window.MeowProductivity = {
+  window.MeowProductivity = productivityApi({
     init,
     shouldSuppressIdle,
     isFocusSessionActive,
     isWaterChaseActive,
-    isPatrolModeActive,
     openFocusModal,
     closeFocusModal,
     openHub,
@@ -1556,7 +1562,7 @@
     pauseFocusSession,
     applyWindowSize,
     syncStackLayout,
-  };
+  });
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

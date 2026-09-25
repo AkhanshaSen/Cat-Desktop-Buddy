@@ -16,6 +16,48 @@ let tray = null;
 let catWindowTargetSize = { width: 220, height: 240 };
 let catWindowDragging = false;
 
+/** One short line: [CORRECT] / [ERROR] / [DELAYED]. */
+function logTag(text) {
+  const s = String(text || '').toLowerCase();
+  if (/fail|error|missing|crash|denied/.test(s)) return '[ERROR]';
+  if (/skip|delay|retry|wait|snooze|overdue|cancel/.test(s)) return '[DELAYED]';
+  return '[CORRECT]';
+}
+
+function logBrief(value) {
+  if (value == null || value === '') return '';
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try { return logBrief(JSON.parse(trimmed)); } catch (_) { return trimmed.slice(0, 90); }
+    }
+    return trimmed.length > 90 ? `${trimmed.slice(0, 87)}…` : trimmed;
+  }
+  if (typeof value !== 'object') return String(value);
+  const bits = [];
+  if (value.text) bits.push(String(value.text).slice(0, 70));
+  if (typeof value.active === 'boolean') bits.push(value.active ? 'on' : 'off');
+  if (typeof value.showHub === 'boolean') bits.push(value.showHub ? 'panel open' : 'panel closed');
+  if (typeof value.showPinned === 'boolean') bits.push(value.showPinned ? 'today card on' : 'today card off');
+  if (value.minutes != null) bits.push(`${value.minutes} min`);
+  if (value.tab) bits.push(String(value.tab));
+  if (value.expr) bits.push(String(value.expr));
+  if (typeof value.paused === 'boolean') bits.push(value.paused ? 'paused' : 'moving');
+  if (typeof value.silent === 'boolean') bits.push(value.silent ? 'quiet' : 'spoken');
+  if (value.ms != null) bits.push(`${Math.round(Number(value.ms) / 1000)}s`);
+  if (value.completed === true) bits.push('finished');
+  if (value.cancelled === true) bits.push('cancelled');
+  if (bits.length) return bits.join(' · ');
+  return Object.keys(value).slice(0, 3).map((key) => `${key} ${logBrief(value[key])}`).filter(Boolean).join(' · ');
+}
+
+function logLine(tag, message) {
+  const text = String(message || '').replace(/\s+/g, ' ').trim();
+  if (!text) return;
+  console.log(`${tag || logTag(text)} ${text}`);
+}
+
 const CAT_WINDOW_WIDTH = 220;
 
 function getDefaultCatWindowHeight() {
@@ -307,7 +349,7 @@ function createCatWindow() {
   const bottomMargin = 20;
   catWindowTargetSize = { width: CAT_WINDOW_WIDTH, height: winHeight };
 
-  console.log('[Meow:main] createCatWindow', { w: CAT_WINDOW_WIDTH, h: winHeight });
+  logLine('[CORRECT]', `cat window opened · ${CAT_WINDOW_WIDTH}×${winHeight}`);
   catWindow = new BrowserWindow({
     width: 220,
     height: winHeight,
@@ -330,6 +372,7 @@ function createCatWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false,
     },
   });
 
@@ -372,7 +415,7 @@ function syncPanelOverlayBounds() {
 
 function createPanelOverlayWindow() {
   const area = getPrimaryWorkArea();
-  console.log('[Meow:main] createPanelOverlayWindow', area);
+  logLine('[CORRECT]', 'panel overlay opened');
   panelOverlayWindow = new BrowserWindow({
     x: area.x,
     y: area.y,
@@ -396,6 +439,7 @@ function createPanelOverlayWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false,
     },
   });
 
@@ -406,14 +450,17 @@ function createPanelOverlayWindow() {
   panelOverlayWindow.setIgnoreMouseEvents(true, { forward: true });
   panelOverlayWindow.loadFile(path.join(__dirname, 'src', 'index-panels.html'));
   panelOverlayWindow.webContents.on('did-finish-load', () => {
-    console.log('[Meow:main] overlay did-finish-load', panelOverlayWindow.webContents.getURL());
+    logLine('[CORRECT]', 'overlay page ready');
   });
-  panelOverlayWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
-    console.error('[Meow:main] overlay did-fail-load', code, desc, url);
+  panelOverlayWindow.webContents.on('did-fail-load', (_e, code, desc) => {
+    logLine('[ERROR]', `overlay failed to load · ${desc || code}`);
   });
   panelOverlayWindow.webContents.on('console-message', (_e, level, message) => {
-    if (String(message).includes('[Meow')) return; // already logged via ipc
-    if (level >= 2) console.log('[Meow:overlay-console]', message);
+    const text = String(message || '');
+    if (text.includes('[CORRECT]') || text.includes('[ERROR]') || text.includes('[DELAYED]')) return;
+    if (text.includes('[Meow')) return;
+    if (level >= 3) logLine('[ERROR]', text);
+    else if (level === 2) logLine('[DELAYED]', text);
   });
 
   if (process.platform === 'darwin') {
@@ -434,14 +481,21 @@ function createPanelOverlayWindow() {
 
 function broadcastToWindows(channel, payload) {
   const msg = { channel: String(channel || ''), payload };
-  for (const win of [catWindow, panelOverlayWindow]) {
+  const sent = [];
+  const missing = [];
+  for (const [name, win] of [['cat', catWindow], ['overlay', panelOverlayWindow]]) {
     if (win && !win.isDestroyed()) {
-      console.log('[Meow:main] send→', win === catWindow ? 'cat' : 'overlay', channel);
       win.webContents.send('meow:broadcast', msg);
+      sent.push(name);
     } else {
-      console.log('[Meow:main] skip send', win === catWindow ? 'cat' : 'overlay', 'missing');
+      missing.push(name);
     }
   }
+  const detail = logBrief(payload);
+  const where = sent.length ? sent.join(' + ') : 'nobody';
+  const gap = missing.length ? ` · no ${missing.join(' or ')}` : '';
+  const tag = !sent.length ? '[ERROR]' : missing.length ? '[DELAYED]' : '[CORRECT]';
+  logLine(tag, `${channel} → ${where}${detail ? ` · ${detail}` : ''}${gap}`);
 }
 
 function windowFromEvent(event) {
@@ -559,13 +613,17 @@ ipcMain.on('overlay:set-ignore', (event, payload = {}) => {
 
 ipcMain.on('meow:log', (event, payload = {}) => {
   const win = BrowserWindow.fromWebContents(event.sender);
-  const role = payload.role || (win === panelOverlayWindow ? 'overlay' : win === catWindow ? 'cat' : 'renderer');
+  const role = payload.role || (win === panelOverlayWindow ? 'overlay' : win === catWindow ? 'cat' : 'app');
   const args = Array.isArray(payload.args) ? payload.args : [payload];
-  console.log(`[Meow:${role}]`, ...args);
+  const head = String(args[0] || '');
+  if (/^(cat recv|broadcast recv)\b/.test(head)) return;
+  const text = args.map(logBrief).filter(Boolean).join(' · ');
+  if (!text) return;
+  const who = role === 'renderer' ? (win === catWindow ? 'cat' : win === panelOverlayWindow ? 'overlay' : 'app') : role;
+  logLine(logTag(text), `${who}: ${text}`);
 });
 
 ipcMain.on('meow:broadcast', (_event, channel, payload) => {
-  console.log('[Meow:main] broadcast', channel, payload ?? '');
   broadcastToWindows(channel, payload);
 });
 
@@ -664,7 +722,9 @@ if (gotSingleInstanceLock) {
     });
 
     agent.runHealthCheck().then((health) => {
-      if (health) console.log('[Meow] Gemini health:', health.ok ? health.message : `${health.reason}: ${health.message}`);
+      if (health) {
+        logLine(health.ok ? '[CORRECT]' : '[ERROR]', health.ok ? 'Gemini ready' : `Gemini: ${health.message || health.reason}`);
+      }
     }).catch(() => {});
 
     app.on('activate', () => {

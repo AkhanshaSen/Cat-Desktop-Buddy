@@ -13,7 +13,7 @@
 
   /** Includes 1m for tests/dev; UI picker uses FOCUS_UI_DURATIONS_MIN. */
   const FOCUS_DURATIONS_MIN = [1, 10, 15, 20, 25, 30, 45, 60, 90];
-  /** Polen Focus tab picker (10–60 minutes). */
+  /** Syrax Focus tab picker (10–60 minutes). */
   const FOCUS_UI_DURATIONS_MIN = [10, 15, 20, 25, 30, 45, 60];
   const FOCUS_TIMER_SIZES = ['S', 'M', 'L'];
   const WATER_SNOOZE_MS = 10 * 60 * 1000;
@@ -153,7 +153,7 @@
   function isWaterOverdue(lastDrinkAt, intervalId, now = Date.now(), snoozeUntil = 0) {
     if (Number.isFinite(snoozeUntil) && snoozeUntil > now) return false;
     const ms = waterIntervalMs(intervalId);
-    if (!Number.isFinite(lastDrinkAt) || lastDrinkAt <= 0) return true;
+    if (!Number.isFinite(lastDrinkAt) || lastDrinkAt <= 0) return false;
     return now - lastDrinkAt >= ms;
   }
 
@@ -290,6 +290,121 @@
     return pool[Math.floor(Math.random() * pool.length)];
   }
 
+  function pickIndex(length, random) {
+    const rand = typeof random === 'function' ? random() : Math.random();
+    const i = Math.floor(rand * length);
+    return Math.max(0, Math.min(length - 1, i));
+  }
+
+  function shortenTaskLabel(text, max = 28) {
+    const label = String(text || '').trim();
+    if (!label) return 'that';
+    if (label.length <= max) return label;
+    return `${label.slice(0, max - 1)}…`;
+  }
+
+  const TASK_DONE_LINES = [
+    (label, left) => (left === 1
+      ? `Nice! "${label}" is done — one left~`
+      : `Checked off "${label}"! ${left} to go~`),
+    (label) => `Mrow yes! "${label}" is done~ 🐾`,
+    (label) => `Paw-five! "${label}" complete~`,
+    (label) => `Look at you — "${label}" finished~ ✨`,
+    (label) => `"${label}" done! Keep that streak~`,
+  ];
+
+  const ALL_DONE_LINES = [
+    (n) => `All ${n} done! You're amazing~ 🎉`,
+    () => "Today's list is clear! High five! 🐾✨",
+    () => 'Everything checked off! Proud of you~ 🌟',
+    () => 'Finished the whole list! Treat yourself~ 💕',
+  ];
+
+  function pickTaskDoneLine({ taskText, remainingUnchecked } = {}, random) {
+    const label = shortenTaskLabel(taskText);
+    const left = Math.max(0, Number(remainingUnchecked) || 0);
+    return TASK_DONE_LINES[pickIndex(TASK_DONE_LINES.length, random)](label, left);
+  }
+
+  function pickAllTasksDoneLine({ count } = {}, random) {
+    const n = Math.max(1, Number(count) || 1);
+    return ALL_DONE_LINES[pickIndex(ALL_DONE_LINES.length, random)](n);
+  }
+
+  /**
+   * Focus and patrol cannot run together.
+   * A focus timer counts as focus even when the Focus mode switch is off.
+   * Activity level only changes timing inside the mode that is actually active.
+   */
+  const LOAF_LEVELS = {
+    quiet: { intervalMs: 28000, act: 0.16, walk: 0.05, play: 0.35, speech: 0.12 },
+    normal: { intervalMs: 12000, act: 0.42, walk: 0.12, play: 0.48, speech: 0.28 },
+    chatty: { intervalMs: 6500, act: 0.78, walk: 0.18, play: 0.55, speech: 0.5 },
+  };
+  const PATROL_LEVELS = {
+    quiet: { intervalMs: 16000, act: 0.5, walk: 0.78, play: 0.2, speech: 0.06 },
+    normal: { intervalMs: 8000, act: 0.84, walk: 0.72, play: 0.3, speech: 0.14 },
+    chatty: { intervalMs: 4500, act: 0.95, walk: 0.64, play: 0.42, speech: 0.3 },
+  };
+
+  /**
+   * Focus timer and the Focus mode switch stay together.
+   * Starting a timer turns the switch on. Ending it turns the switch off
+   * only when the timer was what turned it on.
+   */
+  function nextFocusLink(state = {}, active) {
+    const focusMode = !!state.focusMode;
+    const fromSession = !!state.focusModeFromSession;
+    if (active) {
+      return {
+        focusMode: true,
+        focusSession: true,
+        focusModeFromSession: focusMode ? fromSession : true,
+      };
+    }
+    return {
+      focusMode: fromSession ? false : focusMode,
+      focusSession: false,
+      focusModeFromSession: false,
+    };
+  }
+
+  function resolveCatBehavior({
+    focusMode = false,
+    focusSession = false,
+    patrolMode = false,
+    chattyLevel = 'normal',
+  } = {}) {
+    const level = LOAF_LEVELS[chattyLevel] ? chattyLevel : 'normal';
+    const focusQuiet = !!(focusMode || focusSession);
+    if (focusQuiet) {
+      return {
+        mode: 'focus',
+        level,
+        patrol: false,
+        allowPatrol: false,
+        intervalMs: 30000,
+        act: 0,
+        walk: 0,
+        play: 0,
+        speech: 0,
+      };
+    }
+    const patrol = !!patrolMode;
+    const row = (patrol ? PATROL_LEVELS : LOAF_LEVELS)[level];
+    return {
+      mode: patrol ? 'patrol' : 'loaf',
+      level,
+      patrol,
+      allowPatrol: true,
+      intervalMs: row.intervalMs,
+      act: row.act,
+      walk: row.walk,
+      play: row.play,
+      speech: row.speech,
+    };
+  }
+
   function clampStepToward(fromX, fromY, toX, toY, maxStep) {
     const dx = toX - fromX;
     const dy = toY - fromY;
@@ -317,6 +432,47 @@
       x: Math.max(m, Math.min(Number.isFinite(x) ? x : m, areaW - w - m)),
       y: Math.max(m, Math.min(Number.isFinite(y) ? y : m, areaH - h - m)),
     };
+  }
+
+  function copyScreenPosition(from) {
+    const x = Number(from?.x);
+    const y = Number(from?.y);
+    return {
+      x: Number.isFinite(x) ? x : 0,
+      y: Number.isFinite(y) ? y : 0,
+    };
+  }
+
+  function rectanglesOverlap(a, aSize, b, bSize, pad = 4) {
+    const ax = Number(a?.x);
+    const ay = Number(a?.y);
+    const bx = Number(b?.x);
+    const by = Number(b?.y);
+    if (![ax, ay, bx, by].every(Number.isFinite)) return false;
+    const aw = Math.max(1, Number(aSize?.width) || 220);
+    const ah = Math.max(1, Number(aSize?.height) || 160);
+    const bw = Math.max(1, Number(bSize?.width) || 220);
+    const bh = Math.max(1, Number(bSize?.height) || 160);
+    return ax < bx + bw + pad && ax + aw + pad > bx && ay < by + bh + pad && ay + ah + pad > by;
+  }
+
+  /**
+   * Place a panel at `pos`. If it overlaps `otherPos`, nudge right/down by `delta`, then clamp.
+   */
+  function offsetForCoexistence(pos, panelSize, workArea, otherPos, otherSize, delta = 16) {
+    const base = copyScreenPosition(pos);
+    const d = Number.isFinite(Number(delta)) ? Number(delta) : 16;
+    const shifted = rectanglesOverlap(base, panelSize, otherPos, otherSize)
+      ? { x: base.x + d, y: base.y + d }
+      : base;
+    return clampScreenPosition(shifted, panelSize, workArea);
+  }
+
+  function resolveInheritPosition(fromPos, toSize, fromSize, workArea, opts = {}) {
+    const from = copyScreenPosition(fromPos);
+    return opts.offsetIfBothVisible
+      ? offsetForCoexistence(from, toSize, workArea, from, fromSize, 16)
+      : clampScreenPosition(from, toSize, workArea);
   }
 
   /**
@@ -370,9 +526,17 @@
     chaseStepToward,
     chaseSmoothStep,
     pickTaskNudge,
+    pickTaskDoneLine,
+    pickAllTasksDoneLine,
+    resolveCatBehavior,
+    nextFocusLink,
     clampStepToward,
     normalizeFocusTimerSize,
     clampScreenPosition,
+    copyScreenPosition,
+    rectanglesOverlap,
+    offsetForCoexistence,
+    resolveInheritPosition,
     normalizeScreenPositions,
   };
 });

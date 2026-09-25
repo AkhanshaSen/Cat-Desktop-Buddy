@@ -19,7 +19,8 @@
     catSounds: true, // Cat 2: meow clip audio
   };
 
-  let current = { ...DEFAULTS };
+  let current = { ...DEFAULTS, focusSession: false };
+  let applyingRemote = false;
 
   // Load persisted values before other scripts read MeowSettings.get()
   load();
@@ -48,7 +49,24 @@
   }
 
   function save() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
+    const persisted = { ...current };
+    delete persisted.focusSession;
+    delete persisted.focusModeFromSession;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
+  }
+
+  function isFocusLocked() {
+    return !!(current.focusMode || current.focusSession);
+  }
+
+  function publishModes() {
+    if (applyingRemote) return;
+    window.meowAPI?.broadcast?.('settings:modes', {
+      focusMode: !!current.focusMode,
+      patrolMode: !!current.patrolMode && !isFocusLocked(),
+      focusSession: !!current.focusSession,
+      chattyLevel: current.chattyLevel,
+    });
   }
 
   function get() {
@@ -61,7 +79,7 @@
 
     const focusBadge = document.getElementById('focus-badge');
     if (focusBadge) {
-      focusBadge.classList.toggle('hidden', !current.focusMode);
+      focusBadge.classList.toggle('hidden', !(current.focusMode || current.focusSession));
     }
 
     window.meowSettings = get();
@@ -78,34 +96,119 @@
     }
   }
 
-  function setFocusMode(value) {
+  function applyQuietToCat() {
+    window.MeowCat?.setFocusMode?.(isFocusLocked());
+  }
+
+  function applyFocusLink(active) {
+    const next = window.MeowProductivityLogic?.nextFocusLink?.(current, active) || {
+      focusMode: !!active || !!current.focusMode,
+      focusSession: !!active,
+      focusModeFromSession: !!active && !current.focusMode,
+    };
+    current.focusMode = next.focusMode;
+    current.focusSession = next.focusSession;
+    current.focusModeFromSession = next.focusModeFromSession;
+    if (current.focusMode || current.focusSession) current.patrolMode = false;
+  }
+
+  function setFocusMode(value, opts = {}) {
+    if (!value && current.focusSession && !opts.fromSession) {
+      current.focusMode = false;
+      current.focusSession = false;
+      current.focusModeFromSession = false;
+      save();
+      notifyChange('focusMode');
+      notifyChange('focusSession');
+      applyQuietToCat();
+      syncUI();
+      publishModes();
+      window.meowAPI?.broadcast?.('focus:end-from-toggle');
+      window.dispatchEvent(new CustomEvent('meow:end-focus-session'));
+      return;
+    }
     current.focusMode = !!value;
-    if (current.focusMode) current.patrolMode = false;
+    if (current.focusMode) {
+      current.patrolMode = false;
+      current.focusModeFromSession = false;
+    }
     save();
     notifyChange('focusMode');
     notifyChange('patrolMode');
-    window.MeowCat?.setFocusMode?.(current.focusMode);
-    if (current.focusMode) {
-      window.MeowCat?.showSpeech?.('Focus mode on — quiet paws~ 🌙', 2500);
-    } else {
-      window.MeowCat?.showSpeech?.('Focus off — I can chat again! 🐾', 2500);
+    applyQuietToCat();
+    if (!opts.silent) {
+      if (current.focusMode) {
+        window.MeowCat?.showSpeech?.('Focus mode — quiet paws. Patrol stays off~ 🌙', 2800);
+      } else if (!current.focusSession) {
+        window.MeowCat?.showSpeech?.('Focus off — I can wander again if you want~ 🐾', 2500);
+      }
     }
     syncUI();
+    publishModes();
   }
 
-  function setPatrolMode(value) {
+  function setPatrolMode(value, opts = {}) {
+    if (value && isFocusLocked()) {
+      current.patrolMode = false;
+      save();
+      notifyChange('patrolMode');
+      syncUI();
+      publishModes();
+      if (!opts.silent) {
+        window.MeowCat?.showSpeech?.('Syrax is focusing — patrol stays off~', 2800);
+      }
+      return;
+    }
     current.patrolMode = !!value;
     if (current.patrolMode) current.focusMode = false;
     save();
     notifyChange('patrolMode');
     notifyChange('focusMode');
-    window.MeowCat?.setFocusMode?.(current.focusMode);
-    if (current.patrolMode) {
-      window.MeowCat?.showSpeech?.('Patrol mode — I\'ll wander & play~ 🐾', 2500);
-    } else {
-      window.MeowCat?.showSpeech?.('Patrol off — back to cozy loaf~', 2500);
+    applyQuietToCat();
+    if (!opts.silent) {
+      if (current.patrolMode) {
+        window.MeowCat?.showSpeech?.('Patrol on — I\'ll roam and play~ 🐾', 2500);
+      } else {
+        window.MeowCat?.showSpeech?.('Patrol off — back to a cozy loaf~', 2500);
+      }
     }
     syncUI();
+    publishModes();
+  }
+
+  /** Focus timer on or off. The Focus mode switch follows the timer. */
+  function setFocusSessionActive(active, opts = {}) {
+    if (!active && opts.forceOff) {
+      current.focusMode = false;
+      current.focusSession = false;
+      current.focusModeFromSession = false;
+    } else {
+      applyFocusLink(!!active);
+    }
+    save();
+    notifyChange('focusSession');
+    notifyChange('focusMode');
+    notifyChange('patrolMode');
+    applyQuietToCat();
+    syncUI();
+    publishModes();
+  }
+
+  function applyRemoteModes(payload) {
+    if (!payload || applyingRemote) return;
+    applyingRemote = true;
+    if (typeof payload.focusSession === 'boolean') current.focusSession = payload.focusSession;
+    if (typeof payload.focusMode === 'boolean') current.focusMode = payload.focusMode;
+    if (isFocusLocked()) current.patrolMode = false;
+    else if (typeof payload.patrolMode === 'boolean') current.patrolMode = payload.patrolMode;
+    if (['quiet', 'normal', 'chatty'].includes(payload.chattyLevel)) {
+      current.chattyLevel = payload.chattyLevel;
+    }
+    save();
+    applyQuietToCat();
+    notifyChange('all');
+    syncUI();
+    applyingRemote = false;
   }
 
   function setChattyLevel(level) {
@@ -114,6 +217,7 @@
     save();
     notifyChange('chattyLevel');
     syncUI();
+    publishModes();
   }
 
   function setReducedMotion(value) {
@@ -151,10 +255,28 @@
     if (!panel) return;
 
     const focusToggle = panel.querySelector('#setting-focus');
-    if (focusToggle) focusToggle.checked = current.focusMode;
+    if (focusToggle) focusToggle.checked = !!(current.focusMode || current.focusSession);
+    const focusHint = panel.querySelector('#focus-settings-hint');
+    if (focusHint) {
+      focusHint.textContent = current.focusSession
+        ? 'On with the focus timer. Turn this off to end the timer.'
+        : 'Quiet company. No walks, play, or feed reminders. A focus timer turns this on too.';
+    }
 
+    const locked = isFocusLocked();
+    const patrolRow = panel.querySelector('#patrol-settings-row');
+    patrolRow?.classList.toggle('is-locked', locked);
     const patrolToggle = panel.querySelector('#setting-patrol');
-    if (patrolToggle) patrolToggle.checked = current.patrolMode;
+    if (patrolToggle) {
+      patrolToggle.checked = locked ? false : current.patrolMode;
+      patrolToggle.setAttribute('aria-disabled', locked ? 'true' : 'false');
+    }
+    const patrolHint = panel.querySelector('#patrol-settings-hint');
+    if (patrolHint) {
+      patrolHint.textContent = locked
+        ? 'Off while Focus mode or a focus timer is on. Syrax stays quiet until that ends.'
+        : 'Roam and play across the desktop. No feed reminders. Cannot turn on during Focus.';
+    }
 
     const motionToggle = panel.querySelector('#setting-motion');
     if (motionToggle) motionToggle.checked = current.reducedMotion;
@@ -187,6 +309,14 @@
       e.stopPropagation();
       setPatrolMode(e.target.checked);
     });
+
+    panel.querySelector('#patrol-settings-row')?.addEventListener('pointerdown', (e) => {
+      if (!isFocusLocked()) return;
+      e.preventDefault();
+      e.stopPropagation();
+      syncUI();
+      window.MeowCat?.showSpeech?.('Syrax is focusing — patrol stays off~', 2800);
+    }, true);
 
     panel.querySelector('#setting-motion')?.addEventListener('change', (e) => {
       e.stopPropagation();
@@ -260,16 +390,16 @@
           <span class="toggle-slider"></span>
         </label>
       </div>
-      <p class="settings-hint">Pauses walks, butterfly chases, feed reminders, and idle antics</p>
+      <p class="settings-hint" id="focus-settings-hint">Quiet company. No walks, play, or feed reminders. A focus timer turns this on too.</p>
 
-      <div class="settings-row">
+      <div class="settings-row" id="patrol-settings-row">
         <label class="settings-label" for="setting-patrol">Patrol mode</label>
         <label class="toggle">
-          <input type="checkbox" id="setting-patrol" ${current.patrolMode ? 'checked' : ''} />
+          <input type="checkbox" id="setting-patrol" ${current.patrolMode && !current.focusMode ? 'checked' : ''} />
           <span class="toggle-slider"></span>
         </label>
       </div>
-      <p class="settings-hint">Wander and play; no scheduled feed prompts (Focus = quiet; Patrol = active)</p>
+      <p class="settings-hint" id="patrol-settings-hint">Roam and play across the desktop. No feed reminders. Cannot turn on during Focus.</p>
 
       <div class="settings-row settings-col">
         <span class="settings-label">Activity level</span>
@@ -279,7 +409,7 @@
           <button type="button" class="chatty-btn${current.chattyLevel === 'chatty' ? ' active' : ''}" data-level="chatty">Chatty</button>
         </div>
       </div>
-      <p class="settings-hint">How often I wander, nap, chase butterflies, or say something</p>
+      <p class="settings-hint">Quiet is rare and brief. Normal mixes loaf, walks, and comments. Chatty is frequent. In Patrol, this sets how often Syrax roams.</p>
 
       <div class="settings-row settings-col">
         <span class="settings-label">Feed me reminder</span>
@@ -323,7 +453,7 @@
 
       <div class="settings-divider"></div>
       <p class="settings-section-title">Chat &amp; tasks</p>
-      <p class="settings-hint">Water reminders: Polen&rsquo;s panel &rarr; Remind tab</p>
+      <p class="settings-hint">Water reminders: Syrax&rsquo;s panel &rarr; Remind tab</p>
       `;
     } else {
       panel.innerHTML = `
@@ -334,19 +464,19 @@
           <span class="toggle-slider"></span>
         </label>
       </div>
-      <p class="settings-hint">Quiet paws — pauses idle interruptions (not the Focus session timer)</p>
+      <p class="settings-hint" id="focus-settings-hint">Quiet company. No walks or idle play. A focus timer turns this on too.</p>
 
-      <div class="settings-row">
+      <div class="settings-row" id="patrol-settings-row">
         <label class="settings-label" for="setting-patrol">Patrol mode</label>
         <label class="toggle">
-          <input type="checkbox" id="setting-patrol" ${current.patrolMode ? 'checked' : ''} />
+          <input type="checkbox" id="setting-patrol" ${current.patrolMode && !current.focusMode ? 'checked' : ''} />
           <span class="toggle-slider"></span>
         </label>
       </div>
-      <p class="settings-hint">Wander and play; no scheduled feed prompts (Focus = quiet; Patrol = active)</p>
+      <p class="settings-hint" id="patrol-settings-hint">Roam and play across the desktop. Cannot turn on during Focus.</p>
 
       <div class="settings-row settings-col">
-        <span class="settings-label">Chatty level</span>
+        <span class="settings-label">Activity level</span>
         <div class="segmented">
           <button type="button" class="chatty-btn${current.chattyLevel === 'quiet' ? ' active' : ''}" data-level="quiet">Quiet</button>
           <button type="button" class="chatty-btn${current.chattyLevel === 'normal' ? ' active' : ''}" data-level="normal">Normal</button>
@@ -373,7 +503,8 @@
       </div>
 
       <div class="settings-divider"></div>
-      <p class="settings-hint">Water reminders: Polen&rsquo;s panel &rarr; Remind tab</p>
+      <p class="settings-hint">Quiet is rare. Normal is a mix. Chatty is frequent play and comments. In Patrol, this sets how often Syrax roams.</p>
+      <p class="settings-hint">Water reminders: Syrax&rsquo;s panel &rarr; Remind tab</p>
       `;
     }
 
@@ -469,11 +600,17 @@
     notifyChange('all');
   }
 
+  window.meowAPI?.onBroadcast?.((channel, payload) => {
+    if (channel === 'settings:modes') applyRemoteModes(payload);
+  });
+
   window.MeowSettings = {
     get,
     load,
+    isFocusLocked,
     setFocusMode,
     setPatrolMode,
+    setFocusSessionActive,
     setChattyLevel,
     setReducedMotion,
     setSnoozeDuration,

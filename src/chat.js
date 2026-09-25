@@ -32,7 +32,7 @@
   function readHubPanelVisibleFromStorage() {
     try {
       const p = JSON.parse(localStorage.getItem(PROD_SETTINGS_KEY) || '{}');
-      return !!(p?.notesVisible || p?.tasksWidgetPinned);
+      return !!(p?.notesVisible || (p?.tasksWidgetPinned && p?.pinnedTasksVisible !== false));
     } catch (_) {
       return false;
     }
@@ -70,9 +70,14 @@
     window.MeowCat?.setExpression?.(expr);
   }
 
+  function chatStore() {
+    return window.sessionStorage;
+  }
+
   function loadChatHistory() {
     try {
-      const raw = localStorage.getItem(CHAT_HISTORY_KEY);
+      localStorage.removeItem(CHAT_HISTORY_KEY);
+      const raw = chatStore().getItem(CHAT_HISTORY_KEY);
       if (!raw) return [];
       const arr = JSON.parse(raw);
       return Array.isArray(arr) ? arr.slice(-MAX_HISTORY) : [];
@@ -84,7 +89,7 @@
   function saveChatHistory(role, text) {
     const hist = loadChatHistory();
     hist.push({ role, text, ts: Date.now() });
-    localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(hist.slice(-MAX_HISTORY)));
+    chatStore().setItem(CHAT_HISTORY_KEY, JSON.stringify(hist.slice(-MAX_HISTORY)));
   }
 
   function switchTab(tab) {

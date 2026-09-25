@@ -260,9 +260,9 @@
       return true;
     }
 
-    function wakeFromSleepFlow() {
+    function wakeFromSleepFlow({ quiet = false } = {}) {
       if (!ctx.isSleeping) return;
-      ctx.cat2ActivityLog('end', 'sleep');
+      ctx.cat2ActivityLog('end', 'sleep', { quiet });
       if (ctx.sleepTimeout) clearTimeout(ctx.sleepTimeout);
       catEl.dataset.sleeping = '';
       ctx.isBusy = false;
@@ -272,22 +272,25 @@
       ctx.setExpression('happy', { skipSync: true });
       Cat2Player.cancelPending?.();
       ctx.snapVideoClip();
-      ctx.sayDialogue('wake', 3000);
+      if (!quiet) ctx.sayDialogue('wake', 3000);
     }
 
-    function wakeUp() {
+    function wakeUp(opts = {}) {
       if (!ctx.isSleeping) return false;
-      ctx.cat2ActivityLog('interrupt', 'sleep', { trigger: 'wakeUp' });
+      const quiet = !!opts.quiet;
+      ctx.cat2ActivityLog('interrupt', 'sleep', { trigger: 'wakeUp', quiet });
       if (CLIP_FLOW_MODE) {
-        wakeFromSleepFlow();
+        wakeFromSleepFlow({ quiet });
       } else {
         if (ctx.sleepTimeout) clearTimeout(ctx.sleepTimeout);
         catEl.dataset.sleeping = '';
         ctx.animLock = false;
         ctx.setPose('loaf');
         ctx.setExpression('happy');
-        ctx.playAnimation('yawn', 900);
-        ctx.sayDialogue('wake', 3000);
+        if (!quiet) {
+          ctx.playAnimation('yawn', 900);
+          ctx.sayDialogue('wake', 3000);
+        }
       }
       ctx.scheduleEyeUpdate();
       return true;
@@ -341,10 +344,15 @@
       startButterflyMovement(dir);
     }
 
-    async function startWalk({ afterDecline = false, afterMeal = false } = {}) {
+    async function startWalk({ afterDecline = false, afterMeal = false, patrol = false } = {}) {
       if (ctx.isWalking) return false;
-      const forceStart = afterDecline || afterMeal;
-      if (!forceStart) {
+      const forceStart = afterDecline || afterMeal || patrol;
+      if (patrol) {
+        if (ctx.isSleeping || ctx.isEating || ctx.breakAlertActive) return false;
+        if (ctx.isFocusMode || ctx.getSettings().focusMode || ctx.getSettings().focusSession) return false;
+        if (window.MeowProductivity?.shouldSuppressIdle?.()) return false;
+        if (Cat2Player.isTransitioning?.()) return false;
+      } else if (!forceStart) {
         if (!ctx.canDoActivity()) return false;
         if (Cat2Player.getCurrentKey() !== 'idle') return false;
         if (Cat2Player.isTransitioning?.()) return false;

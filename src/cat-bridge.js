@@ -72,8 +72,10 @@
       }
     } else if (channel === 'cat:wake') {
       window.MeowCat?.wakeUp?.();
+    } else if (channel === 'cat:task-reaction') {
+      window.MeowCat?.reactToTask?.(payload);
     } else if (channel === 'cat:celebrate') {
-      window.MeowCat?.wakeUp?.();
+      window.MeowCat?.wakeUp?.({ quiet: true });
       window.MeowCat?.setExpression?.('excited');
       window.MeowCat?.bounce?.();
     } else if (channel === 'chat:open') {

@@ -78,12 +78,13 @@ check('formatCountdown pads seconds', () => {
   assert.strictEqual(Logic.formatCountdown(90 * 1000), '1:30');
 });
 
-check('isWaterOverdue when never drank', () => {
-  assert.strictEqual(Logic.isWaterOverdue(0, 45, Date.now()), true);
+check('isWaterOverdue waits until a drink time exists', () => {
+  assert.strictEqual(Logic.isWaterOverdue(0, 45, Date.now()), false);
 });
 
 check('isWaterOverdue respects interval', () => {
-  const now = 1_000_000;
+  const now = 10_000_000_000;
+  assert.strictEqual(Logic.isWaterOverdue(now, 45, now), false);
   assert.strictEqual(Logic.isWaterOverdue(now - 10 * 60 * 1000, 45, now), false);
   assert.strictEqual(Logic.isWaterOverdue(now - 50 * 60 * 1000, 45, now), true);
 });
@@ -96,9 +97,9 @@ check('isWaterOverdue supports 10s test preset', () => {
 });
 
 check('isWaterOverdue respects snooze', () => {
-  const now = 1_000_000;
+  const now = 10_000_000_000;
   assert.strictEqual(Logic.isWaterOverdue(0, 45, now, now + 5000), false);
-  assert.strictEqual(Logic.isWaterOverdue(0, 45, now, now - 1), true);
+  assert.strictEqual(Logic.isWaterOverdue(now - 50 * 60 * 1000, 45, now, now - 1), true);
 });
 
 check('snoozeWaterUntil adds 10 minutes', () => {
@@ -257,6 +258,135 @@ check('normalizeScreenPositions migrates floats to absolute', () => {
   assert.strictEqual(pos.hub.x, 50);
   assert.strictEqual(pos.hub.y, 100);
   assert.ok(pos.timer);
+});
+
+check('copyScreenPosition copies finite coords', () => {
+  const c = Logic.copyScreenPosition({ x: 120, y: 40 });
+  assert.strictEqual(c.x, 120);
+  assert.strictEqual(c.y, 40);
+  assert.notStrictEqual(c, { x: 120, y: 40 });
+});
+
+check('offsetForCoexistence nudges when panels overlap', () => {
+  const size = { width: 220, height: 180 };
+  const work = { width: 1200, height: 800 };
+  const alone = Logic.offsetForCoexistence(
+    { x: 200, y: 100 },
+    size,
+    work,
+    { x: 500, y: 400 },
+    size,
+    16
+  );
+  assert.strictEqual(alone.x, 200);
+  assert.strictEqual(alone.y, 100);
+  const stacked = Logic.offsetForCoexistence(
+    { x: 200, y: 100 },
+    size,
+    work,
+    { x: 200, y: 100 },
+    size,
+    16
+  );
+  assert.strictEqual(stacked.x, 216);
+  assert.strictEqual(stacked.y, 116);
+});
+
+check('resolveInheritPosition offsets overlapping panels', () => {
+  const size = { width: 220, height: 180 };
+  const work = { width: 1200, height: 800 };
+  const same = Logic.resolveInheritPosition(
+    { x: 80, y: 40 },
+    size,
+    size,
+    work,
+    { offsetIfBothVisible: false }
+  );
+  assert.strictEqual(same.x, 80);
+  assert.strictEqual(same.y, 40);
+  const nudged = Logic.resolveInheritPosition(
+    { x: 80, y: 40 },
+    size,
+    size,
+    work,
+    { offsetIfBothVisible: true }
+  );
+  assert.strictEqual(nudged.x, 96);
+  assert.strictEqual(nudged.y, 56);
+});
+
+check('pickTaskDoneLine includes the task name', () => {
+  const line = Logic.pickTaskDoneLine(
+    { taskText: 'Greet cat', remainingUnchecked: 2 },
+    () => 0
+  );
+  assert.ok(line.includes('Greet cat'));
+  assert.ok(line.includes('2'));
+});
+
+check('pickTaskDoneLine shortens long task names', () => {
+  const long = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const line = Logic.pickTaskDoneLine(
+    { taskText: long, remainingUnchecked: 1 },
+    () => 0
+  );
+  assert.ok(!line.includes(long));
+  assert.ok(line.includes('…'));
+});
+
+check('resolveCatBehavior locks patrol during focus mode or a focus timer', () => {
+  const fromMode = Logic.resolveCatBehavior({
+    focusMode: true,
+    patrolMode: true,
+    chattyLevel: 'chatty',
+  });
+  assert.strictEqual(fromMode.mode, 'focus');
+  assert.strictEqual(fromMode.patrol, false);
+  assert.strictEqual(fromMode.allowPatrol, false);
+  assert.strictEqual(fromMode.act, 0);
+
+  const fromTimer = Logic.resolveCatBehavior({
+    focusMode: false,
+    focusSession: true,
+    patrolMode: true,
+  });
+  assert.strictEqual(fromTimer.mode, 'focus');
+  assert.strictEqual(fromTimer.allowPatrol, false);
+});
+
+check('nextFocusLink turns Focus mode on with the timer and off when the timer ends', () => {
+  const started = Logic.nextFocusLink({ focusMode: false }, true);
+  assert.strictEqual(started.focusMode, true);
+  assert.strictEqual(started.focusSession, true);
+  assert.strictEqual(started.focusModeFromSession, true);
+  const ended = Logic.nextFocusLink(started, false);
+  assert.strictEqual(ended.focusMode, false);
+  assert.strictEqual(ended.focusSession, false);
+
+  const kept = Logic.nextFocusLink({ focusMode: true, focusModeFromSession: false }, true);
+  assert.strictEqual(kept.focusModeFromSession, false);
+  const stillOn = Logic.nextFocusLink(kept, false);
+  assert.strictEqual(stillOn.focusMode, true);
+});
+
+check('resolveCatBehavior makes patrol walk more than loaf, and chatty faster than quiet', () => {
+  const loafQuiet = Logic.resolveCatBehavior({ chattyLevel: 'quiet' });
+  const loafChatty = Logic.resolveCatBehavior({ chattyLevel: 'chatty' });
+  const patrolQuiet = Logic.resolveCatBehavior({ patrolMode: true, chattyLevel: 'quiet' });
+  const patrolChatty = Logic.resolveCatBehavior({ patrolMode: true, chattyLevel: 'chatty' });
+  assert.strictEqual(loafQuiet.mode, 'loaf');
+  assert.strictEqual(patrolQuiet.mode, 'patrol');
+  assert.ok(patrolQuiet.walk > loafQuiet.walk);
+  assert.ok(patrolChatty.intervalMs < patrolQuiet.intervalMs);
+  assert.ok(loafChatty.act > loafQuiet.act);
+  assert.ok(loafChatty.speech > loafQuiet.speech);
+});
+
+check('pickAllTasksDoneLine uses the list count', () => {
+  const line = Logic.pickAllTasksDoneLine({ count: 4 }, () => 0);
+  assert.ok(line.includes('4'));
+  const other = Logic.pickAllTasksDoneLine({ count: 3 }, () => 0.99);
+  assert.ok(other.includes('Treat yourself'));
 });
 
 check('normalizeScreenPositions prefers screenPositions', () => {

@@ -297,16 +297,28 @@
     document.getElementById('focus-badge')?.classList.toggle('hidden', !isFocusMode);
   }
 
-  function getIdleIntervalMs() {
-    const level = getSettings().chattyLevel;
-    if (window.meowBatterySaver) return Math.max(18000, getChattyInterval(level) * 2);
-    return getChattyInterval(level);
+  function behaviorNow() {
+    const settings = getSettings();
+    return window.MeowProductivityLogic?.resolveCatBehavior?.({
+      focusMode: !!settings.focusMode || isFocusMode,
+      focusSession: !!settings.focusSession || !!window.MeowProductivity?.isFocusSessionActive?.(),
+      patrolMode: !!settings.patrolMode,
+      chattyLevel: settings.chattyLevel,
+    }) || {
+      mode: 'loaf',
+      patrol: false,
+      intervalMs: 12000,
+      act: 0.42,
+      walk: 0.12,
+      play: 0.48,
+      speech: 0.28,
+    };
   }
 
-  function getChattyInterval(level) {
-    if (level === 'quiet') return 25000;
-    if (level === 'chatty') return 7000;
-    return 9000;
+  function getIdleIntervalMs() {
+    const ms = behaviorNow().intervalMs || 12000;
+    if (window.meowBatterySaver) return Math.max(18000, ms * 2);
+    return ms;
   }
 
   /* ── Eye tracking ── */
@@ -499,7 +511,12 @@
 
   async function startWalk(opts = {}) {
     const afterMeal = !!opts.afterMeal;
-    if (afterMeal) {
+    const patrol = !!opts.patrol;
+    if (patrol) {
+      if (isSleeping || isEating || isPetting || breakAlertActive) return;
+      if (isFocusMode || getSettings().focusMode || getSettings().focusSession) return;
+      if (window.MeowProductivity?.shouldSuppressIdle?.()) return;
+    } else if (afterMeal) {
       if (isChatOpen() || isSleeping || isEating || isPetting || breakAlertActive) return;
       if (window.MeowProductivity?.shouldSuppressIdle?.()) return;
     } else if (!canDoActivity()) {
@@ -737,14 +754,17 @@
     resetBowlPosition();
   }
 
-  function wakeUp() {
+  function wakeUp(opts = {}) {
     if (!isSleeping) return false;
+    const quiet = !!opts.quiet;
     if (sleepTimeout) clearTimeout(sleepTimeout);
     animLock = false;
     setPose('loaf');
     setExpression('happy');
-    playAnimation('yawn', 900);
-    showSpeech('*yawn* Mrow... nice nap~', 3000);
+    if (!quiet) {
+      playAnimation('yawn', 900);
+      showSpeech('*yawn* Mrow... nice nap~', 3000);
+    }
     scheduleEyeUpdate();
     return true;
   }
@@ -808,8 +828,49 @@
   }
 
   function hideSpeech() {
+    if (catEl.dataset.taskPraise === 'true') return;
+    speechBubble.classList.remove('task-reaction');
     speechBubble.classList.add('hidden');
     if (speechTimeout) clearTimeout(speechTimeout);
+  }
+
+  let taskPraiseRestoreTimer = null;
+
+  function showTaskSpeech(text, duration = 3500) {
+    if (isSleeping) wakeUp({ quiet: true });
+    speechText.textContent = text;
+    speechBubble.classList.add('task-reaction');
+    speechBubble.classList.remove('hidden');
+    catEl.dataset.taskPraise = 'true';
+    if (speechTimeout) clearTimeout(speechTimeout);
+    speechTimeout = setTimeout(() => {
+      speechTimeout = null;
+      catEl.dataset.taskPraise = '';
+      speechBubble.classList.remove('task-reaction');
+      speechBubble.classList.add('hidden');
+    }, duration);
+  }
+
+  function reactToTask(payload) {
+    if (!payload?.text) return;
+    if (taskPraiseRestoreTimer) clearTimeout(taskPraiseRestoreTimer);
+    const duration = payload.duration || 3500;
+    if (isSleeping) wakeUp({ quiet: true });
+    setExpression(payload.allDone ? 'excited' : (payload.expression || 'love'));
+    showTaskSpeech(payload.text, duration);
+    if (payload.allDone) bounce();
+    else wiggle();
+    window.meowAPI?.log?.('task praise shown', String(payload.text).slice(0, 48));
+
+    const napMs = Number(payload.napRemainingMs) || 0;
+    taskPraiseRestoreTimer = setTimeout(() => {
+      taskPraiseRestoreTimer = null;
+      const focusOn = !!window.MeowProductivity?.isFocusSessionActive?.();
+      if (!payload.resumeNap || !focusOn || napMs <= duration + 800) return;
+      const left = napMs - duration - 400;
+      if (left < 1500) return;
+      goToSleep(left, { force: true });
+    }, duration + 400);
   }
 
   function hideMeow() {
@@ -857,10 +918,11 @@
     if (idleLoopInterval) clearInterval(idleLoopInterval);
 
     const tick = () => {
+      const behavior = behaviorNow();
       const settings = getSettings();
-      if (settings.focusMode || isFocusMode) return;
+      if (behavior.mode === 'focus') return;
       if (window.MeowProductivity?.shouldSuppressIdle?.()) return;
-      if (isChatOpen() || isSleeping || isEating || isPetting || breakAlertActive || awaitingFoodChoice) return;
+      if ((isChatOpen() && !behavior.patrol) || isSleeping || isEating || isPetting || breakAlertActive || awaitingFoodChoice) return;
 
       const level = settings.chattyLevel || 'normal';
 
@@ -888,9 +950,9 @@
       }
 
       if (patrol) {
-        if (!isBusy && !animLock && roll < 0.55) {
-          startWalk();
-        } else if (!isBusy && !animLock && roll < 0.8) {
+        if (!isBusy && !animLock && roll < behavior.walk) {
+          startWalk({ patrol: true });
+        } else if (!isBusy && !animLock && roll < behavior.walk + 0.2) {
           startRandomActivity();
         } else if (!isBusy && roll < 0.92) {
           playRandomAnimation();
@@ -1235,9 +1297,15 @@
   window.addEventListener('meow:settings', (e) => {
     const settings = e.detail?.settings;
     if (!settings) return;
-    if (typeof settings.focusMode === 'boolean') setFocusMode(settings.focusMode);
-    if (e.detail?.key === 'chattyLevel' || e.detail?.key === 'patrolMode' || e.detail?.key === 'all') {
+    if (typeof settings.focusMode === 'boolean' || typeof settings.focusSession === 'boolean') {
+      setFocusMode(!!(settings.focusMode || settings.focusSession));
+    }
+    if (e.detail?.key === 'chattyLevel' || e.detail?.key === 'patrolMode' || e.detail?.key === 'focusSession' || e.detail?.key === 'all') {
       restartIdleLoop();
+    }
+    if (e.detail?.key === 'patrolMode' && settings.patrolMode && !settings.focusMode && !settings.focusSession) {
+      if (isSleeping) wakeUp({ quiet: true });
+      startWalk({ patrol: true });
     }
   });
 
@@ -1306,7 +1374,8 @@
 
   window.MeowCat = {
     setExpression, setPose, bounce, wiggle,
-    showSpeech, hideSpeech, blink, wakeUp, stopEating, goToSleep,
+    showSpeech, showTaskSpeech, hideSpeech, blink, wakeUp, stopEating, goToSleep,
+    reactToTask,
     playAnimation, playRandomAnimation, triggerBreakAlert,
     stopActivity, startRandomActivity, stopWalk, startWalk, begForFood,
     showFoodChoice, hideFoodChoice, setFocusMode, snoozeBreak,

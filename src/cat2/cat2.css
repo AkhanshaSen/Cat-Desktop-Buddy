@@ -163,6 +163,19 @@ body:has(#chat-panel:not(.hidden)) #cat.cat2-mode .food-choice:not(.hidden) {
   visibility: hidden;
 }
 
+#cat.cat2-mode[data-task-praise="true"] {
+  position: relative;
+  z-index: 40;
+}
+
+#cat.cat2-mode.feed-prompt-open .speech-bubble.task-reaction,
+#cat.cat2-mode.scratch-active .speech-bubble.task-reaction {
+  visibility: visible;
+  display: block !important;
+  z-index: 60;
+  pointer-events: none;
+}
+
 #cat.cat2-mode.scratch-active {
   z-index: 50;
   position: relative;

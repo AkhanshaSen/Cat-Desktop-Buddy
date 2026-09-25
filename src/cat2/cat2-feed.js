@@ -34,13 +34,40 @@
       return `hsl(${hue}, 76%, ${44 + p * 8}%)`;
     }
 
+    const HUNGER_READY = 0.95;
+
+    function rawHungerProgress() {
+      if (!ctx.hungerCycleStartAt || !ctx.hungerCycleDurationMs) return 0;
+      return Math.min(1, (Date.now() - ctx.hungerCycleStartAt) / ctx.hungerCycleDurationMs);
+    }
+
+    /** Meter is full enough to start a feed ask. Ignores the begging shortcut. */
+    function hungerMeterFull() {
+      if (!CLIP_FLOW_MODE) return true;
+      if (ctx.isEating || ctx.postMealPhase) return false;
+      if (feedState.isEatingPhase?.() || feedState.isPostMealPhase?.()) return false;
+      return rawHungerProgress() >= HUNGER_READY;
+    }
+
+    /**
+     * Safe to begin or continue a feed ask.
+     * Already-hungry phases stay allowed so an in-progress prompt is not dropped.
+     */
+    function isHungerReady() {
+      if (!CLIP_FLOW_MODE) return true;
+      if (ctx.isEating || ctx.postMealPhase) return false;
+      if (feedState.isPostMealPhase?.() || feedState.isEatingPhase?.()) return false;
+      if (feedState.isHungry() || catEl.dataset.begging === 'true') return true;
+      if (feedState.isFlowActive()) return false;
+      return hungerMeterFull();
+    }
+
     function getHungerProgress() {
       if (feedState.isBegging() || feedState.isFlowActive() ||
           ctx.isEating || ctx.postMealPhase) {
         return 1;
       }
-      if (!ctx.hungerCycleStartAt || !ctx.hungerCycleDurationMs) return 0;
-      return Math.min(1, (Date.now() - ctx.hungerCycleStartAt) / ctx.hungerCycleDurationMs);
+      return rawHungerProgress();
     }
 
     function updateHungerMeter() {
@@ -93,6 +120,7 @@
     }
 
     function tryShowFeedPrompt() {
+      if (catEl.dataset.taskPraise === 'true') return false;
       if (catEl.dataset.begging !== 'true' && !feedState.isHungry()) return false;
       if (feedState.isAwaitingChoice()) return true;
       if (ctx.isEating || ctx.isSleeping) return false;
@@ -108,6 +136,7 @@
     }
 
     function ensureFeedPromptVisible() {
+      if (catEl.dataset.taskPraise === 'true') return false;
       if (!CLIP_FLOW_MODE) return false;
       if (ctx.isEating || ctx.isSleeping) return false;
       if (ctx.isChatOpen?.()) return false;
@@ -118,6 +147,7 @@
       }
 
       if (catEl.dataset.begging !== 'true') {
+        if (!hungerMeterFull()) return false;
         feedState.enterHungry();
         ctx.snapVideoClip();
       }
@@ -158,9 +188,14 @@
       scheduleFeedRequest(ctx.getFeedIntervalMs());
     }
 
+    function focusQuietNow() {
+      const settings = ctx.getSettings();
+      return !!(settings.focusMode || settings.focusSession || ctx.isFocusMode);
+    }
+
     function runFeedScheduleTick() {
       ctx.feedScheduleTimeout = null;
-      if (ctx.getSettings().focusMode || ctx.isFocusMode) {
+      if (focusQuietNow()) {
         rescheduleFeedTimeout(2000);
         return;
       }
@@ -178,13 +213,22 @@
         return;
       }
       if (catEl.dataset.begging === 'true' || feedState.isHungry()) {
-        tryShowFeedPrompt();
-        scheduleFeedPromptRetry();
-        rescheduleFeedTimeout(2000);
+        if (feedState.isAwaitingChoice() || hungerMeterFull()) {
+          tryShowFeedPrompt();
+          scheduleFeedPromptRetry();
+          rescheduleFeedTimeout(2000);
+        } else {
+          cancelBegging();
+          rescheduleFeedTimeout(getRemainingFeedMs());
+        }
         return;
       }
       if (feedState.isFlowActive()) {
         feedState.clearStaleFlow();
+      }
+      if (!isHungerReady()) {
+        rescheduleFeedTimeout(getRemainingFeedMs());
+        return;
       }
       if (!ctx.canDoActivity() || Cat2Player.isTransitioning?.()) {
         rescheduleFeedTimeout(500);
@@ -371,6 +415,7 @@
         scheduleFeedPromptRetry();
         return false;
       }
+      if (!isHungerReady()) return false;
       if (Cat2Player.getCurrentKey() !== 'idle') return false;
 
       feedState.enterHungry();
@@ -712,6 +757,8 @@
       clearFeedSchedule,
       hungerMeterColor,
       getHungerProgress,
+      hungerMeterFull,
+      isHungerReady,
       updateHungerMeter,
       stopHungerMeterLoop,
       startHungerMeterLoop,
